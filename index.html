@@ -773,7 +773,7 @@
         /* Floating action button to open chat */
         .ai-fab {
             position: fixed;
-            bottom: 20px;
+            bottom: 180px;
             right: 20px;
             width: 60px;
             height: 60px;
@@ -1023,7 +1023,7 @@
             }
 
             .ai-fab {
-                bottom: 15px;
+                bottom: 170px;
                 right: 15px;
                 width: 55px;
                 height: 55px;
@@ -1170,11 +1170,11 @@
             <!-- Tabs Container -->
             <div class="tabs-container" id="tabsContainer" style="display: none;">
                 <div class="tabs">
-                    <button class="tab" onclick="switchTab('filters')">
-                        📊 Data Filters
-                    </button>
                     <button class="tab active" onclick="switchTab('facility')">
                         💰 Facility Analyzer
+                    </button>
+                    <button class="tab" onclick="switchTab('filters')">
+                        📊 Data Filters
                     </button>
                 </div>
 
@@ -1717,6 +1717,10 @@
                     <div class="legend-item">
                         <div class="legend-marker" style="background: #00ff00; border: 2px solid white;"></div>
                         <span>Dataset Center</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-marker" style="background: #9b59b6; border: 2px solid white;"></div>
+                        <span>Volume-Weighted Center</span>
                     </div>
                 `;
                 return div;
