@@ -5048,17 +5048,26 @@ function updateCombinedResults() {
                     content: `${question}\n\nData Context:\n${dataContext}`
                 });
                 
-                // Call Claude API through local proxy
-                const response = await fetch('http://localhost:3000/api/claude', {
+                // Call Claude API directly
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'x-api-key': apiKey,
+                        'anthropic-version': '2023-06-01'
                     },
                     body: JSON.stringify({
-                        apiKey: apiKey,
+                        model: 'claude-sonnet-4-20250514',
+                        max_tokens: 4096,
                         messages: conversationHistory
                     })
                 });
+                
+                // Check response status
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error?.message || `API returned status ${response.status}`);
+                }
                 
                 const data = await response.json();
                 
