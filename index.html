@@ -6,7 +6,7 @@
     <title>Contaminated Soil Geospatial Analysis</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-image/0.4.0/leaflet-image.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -6740,7 +6740,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         console.log('=== INITIALIZATION ===');
         console.log('XLSX library loaded:', typeof XLSX !== 'undefined');
         console.log('Leaflet loaded:', typeof L !== 'undefined');
-        console.log('leaflet-image loaded:', typeof leafletImage !== 'undefined');
+        console.log('dom-to-image loaded:', typeof domtoimage !== 'undefined');
         console.log('jsPDF loaded:', typeof window.jspdf !== 'undefined');
         console.log('html2canvas loaded:', typeof html2canvas !== 'undefined');
         console.log('File input element:', document.getElementById('fileInput') !== null);
@@ -6759,8 +6759,8 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             console.warn('WARNING: html2canvas library not loaded. PDF export will not work.');
         }
         
-        if (typeof leafletImage === 'undefined') {
-            console.warn('WARNING: leaflet-image library not loaded. Map capture may have issues.');
+        if (typeof domtoimage === 'undefined') {
+            console.warn('WARNING: dom-to-image library not loaded. Map capture quality may be reduced.');
         }
         
         initMap();
@@ -6916,75 +6916,105 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 yPosition += 10;
 
                 try {
+                    console.log('Starting map capture...');
+                    
                     // Store current map view
                     const originalCenter = map.getCenter();
                     const originalZoom = map.getZoom();
                     
-                    // Calculate bounds for all facilities and wells
+                    // Calculate bounds focusing on Permian Basin with facilities and wells
                     const bounds = L.latLngBounds();
+                    let hasData = false;
                     
-                    // Add facility locations and their service radii
+                    // Add all facility positions and their service radii
                     facilities.forEach(facility => {
-                        const latlng = facility.marker.getLatLng();
-                        bounds.extend(latlng);
-                        
-                        // Ensure service radius circles are visible
-                        if (facility.circle) {
-                            const circleBounds = facility.circle.getBounds();
-                            bounds.extend(circleBounds);
+                        if (facility.marker) {
+                            const latlng = facility.marker.getLatLng();
+                            bounds.extend(latlng);
+                            
+                            // Add service radius boundary points
+                            const radiusMiles = facility.serviceRadius || 25;
+                            const radiusMeters = radiusMiles * 1609.34;
+                            const radiusDegrees = radiusMeters / 111320;
+                            
+                            // Extend bounds to include full circle
+                            bounds.extend([latlng.lat + radiusDegrees, latlng.lng]);
+                            bounds.extend([latlng.lat - radiusDegrees, latlng.lng]);
+                            bounds.extend([latlng.lat, latlng.lng + radiusDegrees / Math.cos(latlng.lat * Math.PI / 180)]);
+                            bounds.extend([latlng.lat, latlng.lng - radiusDegrees / Math.cos(latlng.lat * Math.PI / 180)]);
+                            
+                            hasData = true;
                         }
                     });
                     
-                    // Add well locations for context (include more wells for better context)
-                    const wellsToShow = Math.min(500, filteredWellData.length);
-                    filteredWellData.slice(0, wellsToShow).forEach(well => {
+                    // Add well locations for context
+                    filteredWellData.forEach(well => {
                         if (well.lat && well.lng && Math.abs(well.lat) > 0.0001 && Math.abs(well.lng) > 0.0001) {
                             bounds.extend([well.lat, well.lng]);
+                            hasData = true;
                         }
                     });
                     
-                    // Fit map to bounds with padding
-                    if (bounds.isValid()) {
-                        map.fitBounds(bounds, { padding: [80, 80] });
+                    // If no data, use Permian Basin default
+                    if (!hasData) {
+                        bounds.extend([32.5, -103.5]); // North Permian
+                        bounds.extend([31.0, -101.5]); // South Permian
                     }
                     
-                    // Force all layers to redraw
+                    console.log('Calculated bounds:', bounds);
+                    
+                    // Fit map to calculated bounds
+                    map.fitBounds(bounds, { 
+                        padding: [100, 100],
+                        maxZoom: 9,
+                        animate: false
+                    });
+                    
+                    // Force immediate map update
+                    map.invalidateSize(true);
+                    
+                    // Force redraw of all layers
+                    let layerCount = 0;
                     map.eachLayer(layer => {
+                        layerCount++;
                         if (layer.redraw) {
                             layer.redraw();
                         }
+                        if (layer.bringToFront) {
+                            layer.bringToFront();
+                        }
                     });
                     
-                    // Invalidate size to ensure proper rendering
-                    map.invalidateSize();
+                    console.log('Total layers on map:', layerCount);
+                    console.log('Facilities to capture:', facilities.length);
+                    console.log('Wells to capture:', filteredWellData.length);
                     
-                    // Wait for map to fully render all layers
-                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    // Wait for tiles and all layers to load
+                    await new Promise(resolve => {
+                        setTimeout(resolve, 2500); // Longer wait for everything to render
+                    });
                     
-                    // Use leaflet-image to capture the map (better for Leaflet layers)
-                    if (typeof leafletImage !== 'undefined') {
-                        // leaflet-image captures all Leaflet layers properly
-                        const imgData = await new Promise((resolve, reject) => {
-                            leafletImage(map, (err, canvas) => {
-                                if (err) {
-                                    reject(err);
-                                } else {
-                                    resolve(canvas.toDataURL('image/png'));
-                                }
-                            });
+                    console.log('Attempting map capture...');
+                    
+                    const mapElement = document.getElementById('map');
+                    
+                    // Try dom-to-image first (best for SVG/canvas layers)
+                    let imgData;
+                    if (typeof domtoimage !== 'undefined') {
+                        console.log('Using dom-to-image for capture');
+                        imgData = await domtoimage.toPng(mapElement, {
+                            quality: 1,
+                            bgcolor: '#ffffff',
+                            width: mapElement.offsetWidth,
+                            height: mapElement.offsetHeight,
+                            style: {
+                                transform: 'scale(1)',
+                                transformOrigin: 'top left'
+                            }
                         });
-                        
-                        const imgWidth = pageWidth - (margin * 2);
-                        // Estimate height based on map container
-                        const mapHeight = document.getElementById('map').offsetHeight;
-                        const mapWidth = document.getElementById('map').offsetWidth;
-                        const imgHeight = (mapHeight * imgWidth) / mapWidth;
-                        
-                        pdf.addImage(imgData, 'PNG', margin, yPosition, imgWidth, Math.min(imgHeight, 130));
-                        yPosition += Math.min(imgHeight, 130) + 10;
                     } else {
-                        // Fallback to html2canvas if leaflet-image not available
-                        const mapElement = document.getElementById('map');
+                        // Fallback to html2canvas
+                        console.log('Using html2canvas for capture');
                         const canvas = await html2canvas(mapElement, {
                             useCORS: true,
                             allowTaint: true,
@@ -6992,25 +7022,33 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                             width: mapElement.offsetWidth,
                             height: mapElement.offsetHeight,
                             scale: 2,
-                            logging: false
+                            logging: true,
+                            imageTimeout: 0,
+                            removeContainer: false
                         });
-                        
-                        const imgData = canvas.toDataURL('image/png');
-                        const imgWidth = pageWidth - (margin * 2);
-                        const imgHeight = (canvas.height * imgWidth) / canvas.width;
-                        
-                        pdf.addImage(imgData, 'PNG', margin, yPosition, imgWidth, Math.min(imgHeight, 130));
-                        yPosition += Math.min(imgHeight, 130) + 10;
+                        imgData = canvas.toDataURL('image/png');
                     }
+                    
+                    console.log('Map captured successfully');
+                    
+                    const imgWidth = pageWidth - (margin * 2);
+                    const mapHeight = mapElement.offsetHeight;
+                    const mapWidth = mapElement.offsetWidth;
+                    const imgHeight = (mapHeight * imgWidth) / mapWidth;
+                    
+                    pdf.addImage(imgData, 'PNG', margin, yPosition, imgWidth, Math.min(imgHeight, 130));
+                    yPosition += Math.min(imgHeight, 130) + 10;
                     
                     // Restore original map view
                     map.setView(originalCenter, originalZoom);
                     map.invalidateSize();
+                    
+                    console.log('Map capture complete');
                 } catch (error) {
                     console.error('Error capturing map:', error);
                     pdf.setFontSize(10);
                     pdf.setTextColor(200, 0, 0);
-                    pdf.text('(Map visualization could not be captured - ' + error.message + ')', margin, yPosition);
+                    pdf.text('(Map visualization could not be captured: ' + error.message + ')', margin, yPosition);
                     yPosition += 10;
                     pdf.setTextColor(0, 0, 0);
                 }
