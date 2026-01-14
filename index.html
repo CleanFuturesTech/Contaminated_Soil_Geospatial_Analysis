@@ -1950,6 +1950,68 @@
             return lat >= 30.5 && lat <= 33.5 && lng >= -105 && lng <= -100.5;
         }
 
+        // Calculate business days (Mon-Fri, excluding federal holidays)
+        function calculateBusinessDays(startDate, endDate) {
+            // US Federal Holidays for calculation
+            const holidays = [
+                // 2024 holidays
+                new Date(2024, 0, 1),   // New Year's Day
+                new Date(2024, 0, 15),  // MLK Day
+                new Date(2024, 1, 19),  // Presidents Day
+                new Date(2024, 4, 27),  // Memorial Day
+                new Date(2024, 6, 4),   // Independence Day
+                new Date(2024, 8, 2),   // Labor Day
+                new Date(2024, 9, 14),  // Columbus Day
+                new Date(2024, 10, 11), // Veterans Day
+                new Date(2024, 10, 28), // Thanksgiving
+                new Date(2024, 11, 25), // Christmas
+                // 2025 holidays
+                new Date(2025, 0, 1),   // New Year's Day
+                new Date(2025, 0, 20),  // MLK Day
+                new Date(2025, 1, 17),  // Presidents Day
+                new Date(2025, 4, 26),  // Memorial Day
+                new Date(2025, 6, 4),   // Independence Day
+                new Date(2025, 8, 1),   // Labor Day
+                new Date(2025, 9, 13),  // Columbus Day
+                new Date(2025, 10, 11), // Veterans Day
+                new Date(2025, 10, 27), // Thanksgiving
+                new Date(2025, 11, 25), // Christmas
+                // 2026 holidays
+                new Date(2026, 0, 1),   // New Year's Day
+                new Date(2026, 0, 19),  // MLK Day
+                new Date(2026, 1, 16),  // Presidents Day
+                new Date(2026, 4, 25),  // Memorial Day
+                new Date(2026, 6, 3),   // Independence Day (observed)
+                new Date(2026, 8, 7),   // Labor Day
+                new Date(2026, 9, 12),  // Columbus Day
+                new Date(2026, 10, 11), // Veterans Day
+                new Date(2026, 10, 26), // Thanksgiving
+                new Date(2026, 11, 25)  // Christmas
+            ];
+            
+            // Convert holiday dates to simple date strings for comparison (YYYY-MM-DD)
+            const holidayStrings = holidays.map(h => h.toISOString().split('T')[0]);
+            
+            let businessDays = 0;
+            const current = new Date(startDate);
+            const end = new Date(endDate);
+            
+            while (current <= end) {
+                const dayOfWeek = current.getDay();
+                const dateString = current.toISOString().split('T')[0];
+                
+                // Check if it's a weekday (Mon-Fri) and not a holiday
+                if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidayStrings.includes(dateString)) {
+                    businessDays++;
+                }
+                
+                // Move to next day
+                current.setDate(current.getDate() + 1);
+            }
+            
+            return businessDays;
+        }
+
         // Load and parse Excel file with daily transaction data
         async function loadData(workbook, sheetName) {
             console.log('===== LOADDATA FUNCTION CALLED =====');
@@ -3692,6 +3754,10 @@
                                 <span class="landfill-stat-value" id="lf-annual-loads-${index}">0</span>
                             </div>
                             <div class="landfill-stat-row">
+                                <span class="landfill-stat-label">Truckloads/Business Day:</span>
+                                <span class="landfill-stat-value" id="lf-loads-per-day-${index}">0</span>
+                            </div>
+                            <div class="landfill-stat-row">
                                 <span class="landfill-stat-label">CY in Service Radius:</span>
                                 <span class="landfill-stat-value highlight" id="lf-radius-cy-${index}">0</span>
                             </div>
@@ -3810,7 +3876,8 @@
                 totalLoads: 0,
                 annualizedLoads: 0,
                 radiusCY: 0,
-                radiusLoads: 0
+                radiusLoads: 0,
+                loadsPerBusinessDay: 0
             };
             
             // Calculate total CY for this landfill in filtered period
@@ -3823,12 +3890,18 @@
             // Calculate days in filtered period
             const daysInPeriod = (filterEndDate - filterStartDate) / (1000 * 60 * 60 * 24);
             
+            // Calculate business days (Mon-Fri, excluding holidays)
+            const businessDays = calculateBusinessDays(filterStartDate, filterEndDate);
+            
             // Annualized CY
             stats.annualizedCY = (stats.totalCY / daysInPeriod) * 365;
             
             // Total truckloads (CY / 18)
             stats.totalLoads = stats.totalCY / 18;
             stats.annualizedLoads = stats.annualizedCY / 18;
+            
+            // Truckloads per business day
+            stats.loadsPerBusinessDay = businessDays > 0 ? stats.totalLoads / businessDays : 0;
             
             // CY and loads within service radius
             wellData.forEach(well => {
@@ -3861,6 +3934,7 @@
             document.getElementById(`lf-annual-cy-${landfillIndex}`).textContent = formatNumber(stats.annualizedCY, 0) + ' CY';
             document.getElementById(`lf-total-loads-${landfillIndex}`).textContent = formatNumber(stats.totalLoads, 0);
             document.getElementById(`lf-annual-loads-${landfillIndex}`).textContent = formatNumber(stats.annualizedLoads, 0);
+            document.getElementById(`lf-loads-per-day-${landfillIndex}`).textContent = formatNumber(stats.loadsPerBusinessDay, 1);
             document.getElementById(`lf-radius-cy-${landfillIndex}`).textContent = formatNumber(stats.radiusCY, 0) + ' CY';
             document.getElementById(`lf-radius-loads-${landfillIndex}`).textContent = formatNumber(stats.radiusLoads, 0);
         }
@@ -3883,7 +3957,8 @@
                 totalLoads: 0,
                 annualizedLoads: 0,
                 radiusCY: 0,
-                radiusLoads: 0
+                radiusLoads: 0,
+                loadsPerBusinessDay: 0
             };
             
             selectedLandfills.forEach((settings, index) => {
@@ -3895,6 +3970,10 @@
                 combined.radiusCY += stats.radiusCY;
                 combined.radiusLoads += stats.radiusLoads;
             });
+            
+            // Calculate business days for combined results (same for all landfills)
+            const businessDays = calculateBusinessDays(filterStartDate, filterEndDate);
+            combined.loadsPerBusinessDay = businessDays > 0 ? combined.totalLoads / businessDays : 0;
             
             // Render combined results
             combinedSection.innerHTML = `
@@ -3915,6 +3994,10 @@
                     <div class="combined-stat-row">
                         <span class="combined-stat-label">Annualized Truckloads:</span>
                         <span class="combined-stat-value">${formatNumber(combined.annualizedLoads, 0)}</span>
+                    </div>
+                    <div class="combined-stat-row">
+                        <span class="combined-stat-label">Truckloads/Business Day:</span>
+                        <span class="combined-stat-value">${formatNumber(combined.loadsPerBusinessDay, 1)}</span>
                     </div>
                     <div class="combined-stat-row">
                         <span class="combined-stat-label">CY in Service Radii:</span>
