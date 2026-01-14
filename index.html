@@ -199,6 +199,209 @@
             transform: scaleY(1);
         }
 
+        /* Per-Landfill Control Panels */
+        .landfill-control-panel {
+            background: var(--bg-dark);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .landfill-control-panel.selected {
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.2);
+        }
+
+        .landfill-header {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            background: var(--bg-dark);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .landfill-header:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .landfill-header input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin-right: 0.75rem;
+            cursor: pointer;
+        }
+
+        .landfill-header-info {
+            flex: 1;
+        }
+
+        .landfill-header-name {
+            font-weight: 600;
+            font-size: 1rem;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .landfill-header-company {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .landfill-expand-icon {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            transition: transform 0.3s;
+        }
+
+        .landfill-control-panel.expanded .landfill-expand-icon {
+            transform: rotate(180deg);
+        }
+
+        .landfill-controls {
+            display: none;
+            padding: 0 1rem 1rem 1rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .landfill-control-panel.expanded .landfill-controls {
+            display: block;
+        }
+
+        .landfill-radius-control {
+            padding: 1rem;
+            background: rgba(52, 152, 219, 0.1);
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+
+        .landfill-radius-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+
+        .landfill-radius-value {
+            font-weight: 600;
+            color: var(--primary);
+            font-size: 1rem;
+        }
+
+        .landfill-radius-slider {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: var(--border);
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .landfill-radius-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: var(--primary);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .landfill-radius-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: var(--primary);
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+
+        .landfill-stats {
+            padding: 1rem;
+            background: rgba(46, 204, 113, 0.05);
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+
+        .landfill-stats-title {
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: var(--primary);
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .landfill-stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            font-size: 0.85rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .landfill-stat-row:last-child {
+            border-bottom: none;
+        }
+
+        .landfill-stat-label {
+            color: var(--text-secondary);
+        }
+
+        .landfill-stat-value {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .landfill-stat-value.highlight {
+            color: var(--primary);
+            font-size: 0.95rem;
+        }
+
+        .combined-results {
+            background: linear-gradient(135deg, rgba(52, 152, 219, 0.15) 0%, rgba(46, 204, 113, 0.15) 100%);
+            border: 2px solid var(--primary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .combined-results-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 1rem;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .combined-stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            background: var(--bg-dark);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .combined-stat-label {
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        .combined-stat-value {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 1.05rem;
+        }
+
         .landfill-name {
             font-weight: 600;
             font-size: 0.95rem;
@@ -1182,19 +1385,14 @@
                 <div class="tab-content" id="filtersTab">
 
             <div class="section" id="landfillSection" style="display: none;">
-                <div class="section-title">Select Landfills</div>
-                <div class="landfill-list" id="landfillList"></div>
-            </div>
-
-            <div class="section" id="radiusSection" style="display: none;">
-                <div class="section-title">Search Radius</div>
-                <div class="radius-control">
-                    <div class="radius-display">
-                        <span class="radius-value" id="radiusValue">25</span>
-                        <span class="radius-unit">miles</span>
-                    </div>
-                    <input type="range" id="radiusSlider" min="1" max="600" value="25" step="1">
+                <div class="section-title">Landfill Analysis</div>
+                <div class="filter-info" style="margin-bottom: 1rem;">
+                    Select landfills and adjust individual service radii. Statistics update automatically.
                 </div>
+                <div class="landfill-list" id="landfillList"></div>
+                
+                <!-- Combined Results Section -->
+                <div id="combinedResultsSection" style="display: none;"></div>
             </div>
 
             <!-- Moved from later - Results should be in Tab 1 -->
@@ -1634,8 +1832,8 @@
         let myFacilityBackfillPrice = 10; // Backfill price per CY
         let myFacilityBackfillPercentage = 90; // Percentage of volume backfilled
         let placementMode = false; // Whether user is placing facility
-        let selectedLandfills = new Set();
-        let currentRadius = 25;
+        let selectedLandfills = new Map(); // Map: landfillIndex -> {selected: true, radius: 25}
+        // Removed currentRadius - now stored per-landfill in the Map above
         let minDate, maxDate; // Date range from data
         let filterStartDate, filterEndDate; // User-selected filter dates
         let selectedFile = null; // Store selected file
@@ -2027,7 +2225,6 @@
                 document.getElementById('landfillSection').style.display = 'block';
                 document.getElementById('generatorSection').style.display = 'block';
                 document.getElementById('transporterSection').style.display = 'block';
-                document.getElementById('radiusSection').style.display = 'block';
                 document.getElementById('volumeCenterSection').style.display = 'block';
                 document.getElementById('myFacilitySection').style.display = 'block';
                 document.getElementById('statsPanel').style.display = 'block';
@@ -3282,7 +3479,6 @@
             filteredWellData = [];
             landfills = [];
             selectedLandfills.clear();
-            currentRadius = 25;
             maxDistanceFromCenter = 150;
             datasetCenter = null;
             totalOutlierCount = 0;
@@ -3416,33 +3612,259 @@
             }
         });
 
-        // Render landfill selection list
+        // Render landfill selection list with per-landfill controls
         function renderLandfillList() {
             const container = document.getElementById('landfillList');
             container.innerHTML = '';
             
             landfills.forEach((landfill, index) => {
-                const div = document.createElement('div');
-                div.className = 'landfill-item';
-                div.innerHTML = `
-                    <div class="landfill-name">${landfill.site}</div>
-                    <div class="landfill-company">${landfill.company}</div>
+                // Create control panel for each landfill
+                const panel = document.createElement('div');
+                panel.className = 'landfill-control-panel';
+                panel.id = `landfill-panel-${index}`;
+                
+                // Check if this landfill is selected
+                const isSelected = selectedLandfills.has(index);
+                const currentRadius = isSelected ? selectedLandfills.get(index).radius : 25;
+                
+                if (isSelected) {
+                    panel.classList.add('selected', 'expanded');
+                }
+                
+                panel.innerHTML = `
+                    <div class="landfill-header" onclick="toggleLandfillExpand(${index})">
+                        <input type="checkbox" 
+                               id="landfill-checkbox-${index}" 
+                               ${isSelected ? 'checked' : ''}
+                               onclick="event.stopPropagation(); toggleLandfill(${index})">
+                        <div class="landfill-header-info">
+                            <div class="landfill-header-name">${landfill.site}</div>
+                            <div class="landfill-header-company">${landfill.company}</div>
+                        </div>
+                        <span class="landfill-expand-icon">▼</span>
+                    </div>
+                    <div class="landfill-controls">
+                        <div class="landfill-radius-control">
+                            <div class="landfill-radius-label">
+                                <span>Service Radius</span>
+                                <span class="landfill-radius-value" id="radius-value-${index}">${currentRadius} miles</span>
+                            </div>
+                            <input type="range" 
+                                   class="landfill-radius-slider" 
+                                   id="radius-slider-${index}"
+                                   min="1" 
+                                   max="600" 
+                                   value="${currentRadius}" 
+                                   step="1"
+                                   oninput="updateLandfillRadius(${index}, this.value)">
+                        </div>
+                        <div class="landfill-stats" id="landfill-stats-${index}">
+                            <div class="landfill-stats-title">📊 Landfill Statistics</div>
+                            <div class="landfill-stat-row">
+                                <span class="landfill-stat-label">Total CY (Filtered Period):</span>
+                                <span class="landfill-stat-value" id="lf-total-cy-${index}">0</span>
+                            </div>
+                            <div class="landfill-stat-row">
+                                <span class="landfill-stat-label">Annualized CY:</span>
+                                <span class="landfill-stat-value" id="lf-annual-cy-${index}">0</span>
+                            </div>
+                            <div class="landfill-stat-row">
+                                <span class="landfill-stat-label">Total Truckloads:</span>
+                                <span class="landfill-stat-value" id="lf-total-loads-${index}">0</span>
+                            </div>
+                            <div class="landfill-stat-row">
+                                <span class="landfill-stat-label">Annualized Truckloads:</span>
+                                <span class="landfill-stat-value" id="lf-annual-loads-${index}">0</span>
+                            </div>
+                            <div class="landfill-stat-row">
+                                <span class="landfill-stat-label">CY in Service Radius:</span>
+                                <span class="landfill-stat-value highlight" id="lf-radius-cy-${index}">0</span>
+                            </div>
+                            <div class="landfill-stat-row">
+                                <span class="landfill-stat-label">Truckloads in Service Radius:</span>
+                                <span class="landfill-stat-value highlight" id="lf-radius-loads-${index}">0</span>
+                            </div>
+                        </div>
+                    </div>
                 `;
-                div.onclick = () => toggleLandfill(index, div);
-                container.appendChild(div);
+                
+                container.appendChild(panel);
             });
+            
+            // Update combined results if any landfills selected
+            if (selectedLandfills.size > 0) {
+                updateCombinedResults();
+            }
         }
 
         // Toggle landfill selection
-        function toggleLandfill(index, element) {
+        function toggleLandfill(index) {
+            const panel = document.getElementById(`landfill-panel-${index}`);
+            const checkbox = document.getElementById(`landfill-checkbox-${index}`);
+            
             if (selectedLandfills.has(index)) {
+                // Deselect
                 selectedLandfills.delete(index);
-                element.classList.remove('selected');
+                panel.classList.remove('selected', 'expanded');
+                checkbox.checked = false;
             } else {
-                selectedLandfills.add(index);
-                element.classList.add('selected');
+                // Select with default radius
+                selectedLandfills.set(index, { selected: true, radius: 25 });
+                panel.classList.add('selected', 'expanded');
+                checkbox.checked = true;
             }
+            
             updateAnalysis();
+        }
+
+        // Toggle expand/collapse of landfill panel
+        function toggleLandfillExpand(index) {
+            const panel = document.getElementById(`landfill-panel-${index}`);
+            
+            // Only allow expand if selected
+            if (selectedLandfills.has(index)) {
+                panel.classList.toggle('expanded');
+            }
+        }
+
+        // Update landfill radius
+        function updateLandfillRadius(index, newRadius) {
+            const radius = parseInt(newRadius);
+            
+            if (selectedLandfills.has(index)) {
+                selectedLandfills.get(index).radius = radius;
+                document.getElementById(`radius-value-${index}`).textContent = `${radius} miles`;
+                
+                // Update analysis with new radius
+                updateAnalysis();
+            }
+        }
+
+        // Calculate statistics for a specific landfill
+        function calculateLandfillStats(landfillIndex, radius) {
+            const landfill = landfills[landfillIndex];
+            const stats = {
+                totalCY: 0,
+                annualizedCY: 0,
+                totalLoads: 0,
+                annualizedLoads: 0,
+                radiusCY: 0,
+                radiusLoads: 0
+            };
+            
+            // Calculate total CY for this landfill in filtered period
+            wellData.forEach(well => {
+                if (well.destSite === landfill.site) {
+                    stats.totalCY += well.quantity;
+                }
+            });
+            
+            // Calculate days in filtered period
+            const daysInPeriod = (filterEndDate - filterStartDate) / (1000 * 60 * 60 * 24);
+            
+            // Annualized CY
+            stats.annualizedCY = (stats.totalCY / daysInPeriod) * 365;
+            
+            // Total truckloads (CY / 18)
+            stats.totalLoads = stats.totalCY / 18;
+            stats.annualizedLoads = stats.annualizedCY / 18;
+            
+            // CY and loads within service radius
+            wellData.forEach(well => {
+                if (well.destSite === landfill.site && well.landfillLat && well.landfillLng) {
+                    const distance = calculateDistance(
+                        well.lat, well.lng,
+                        landfill.lat, landfill.lng
+                    );
+                    
+                    if (distance <= radius) {
+                        stats.radiusCY += well.quantity;
+                    }
+                }
+            });
+            
+            stats.radiusLoads = stats.radiusCY / 18;
+            
+            return stats;
+        }
+
+        // Update statistics display for a specific landfill
+        function updateLandfillStats(landfillIndex) {
+            if (!selectedLandfills.has(landfillIndex)) return;
+            
+            const settings = selectedLandfills.get(landfillIndex);
+            const stats = calculateLandfillStats(landfillIndex, settings.radius);
+            
+            // Update UI
+            document.getElementById(`lf-total-cy-${landfillIndex}`).textContent = formatNumber(stats.totalCY, 0) + ' CY';
+            document.getElementById(`lf-annual-cy-${landfillIndex}`).textContent = formatNumber(stats.annualizedCY, 0) + ' CY';
+            document.getElementById(`lf-total-loads-${landfillIndex}`).textContent = formatNumber(stats.totalLoads, 0);
+            document.getElementById(`lf-annual-loads-${landfillIndex}`).textContent = formatNumber(stats.annualizedLoads, 0);
+            document.getElementById(`lf-radius-cy-${landfillIndex}`).textContent = formatNumber(stats.radiusCY, 0) + ' CY';
+            document.getElementById(`lf-radius-loads-${landfillIndex}`).textContent = formatNumber(stats.radiusLoads, 0);
+        }
+
+        // Update combined results for all selected landfills
+        function updateCombinedResults() {
+            const combinedSection = document.getElementById('combinedResultsSection');
+            
+            if (selectedLandfills.size === 0) {
+                combinedSection.style.display = 'none';
+                return;
+            }
+            
+            combinedSection.style.display = 'block';
+            
+            // Calculate combined statistics
+            let combined = {
+                totalCY: 0,
+                annualizedCY: 0,
+                totalLoads: 0,
+                annualizedLoads: 0,
+                radiusCY: 0,
+                radiusLoads: 0
+            };
+            
+            selectedLandfills.forEach((settings, index) => {
+                const stats = calculateLandfillStats(index, settings.radius);
+                combined.totalCY += stats.totalCY;
+                combined.annualizedCY += stats.annualizedCY;
+                combined.totalLoads += stats.totalLoads;
+                combined.annualizedLoads += stats.annualizedLoads;
+                combined.radiusCY += stats.radiusCY;
+                combined.radiusLoads += stats.radiusLoads;
+            });
+            
+            // Render combined results
+            combinedSection.innerHTML = `
+                <div class="combined-results">
+                    <div class="combined-results-title">Combined Results - All Selected Landfills</div>
+                    <div class="combined-stat-row">
+                        <span class="combined-stat-label">Total CY (Filtered Period):</span>
+                        <span class="combined-stat-value">${formatNumber(combined.totalCY, 0)} CY</span>
+                    </div>
+                    <div class="combined-stat-row">
+                        <span class="combined-stat-label">Annualized CY:</span>
+                        <span class="combined-stat-value">${formatNumber(combined.annualizedCY, 0)} CY</span>
+                    </div>
+                    <div class="combined-stat-row">
+                        <span class="combined-stat-label">Total Truckloads:</span>
+                        <span class="combined-stat-value">${formatNumber(combined.totalLoads, 0)}</span>
+                    </div>
+                    <div class="combined-stat-row">
+                        <span class="combined-stat-label">Annualized Truckloads:</span>
+                        <span class="combined-stat-value">${formatNumber(combined.annualizedLoads, 0)}</span>
+                    </div>
+                    <div class="combined-stat-row">
+                        <span class="combined-stat-label">CY in Service Radii:</span>
+                        <span class="combined-stat-value">${formatNumber(combined.radiusCY, 0)} CY</span>
+                    </div>
+                    <div class="combined-stat-row">
+                        <span class="combined-stat-label">Truckloads in Service Radii:</span>
+                        <span class="combined-stat-value">${formatNumber(combined.radiusLoads, 0)}</span>
+                    </div>
+                </div>
+            `;
         }
 
         // Render generator list with checkboxes
@@ -3717,7 +4139,7 @@
                 return;
             }
 
-            // Draw circles and find wells in range
+            // Draw circles and find wells in range (using per-landfill radii)
             let wellsInRange = new Set();
             let totalVolume = 0;
             let coordSourceVolumes = {
@@ -3727,12 +4149,13 @@
                 'Landfill County': 0
             };
 
-            selectedLandfills.forEach(index => {
+            selectedLandfills.forEach((settings, index) => {
                 const landfill = landfills[index];
+                const landfillRadius = settings.radius; // Use per-landfill radius
                 
-                // Draw radius circle
+                // Draw radius circle with this landfill's specific radius
                 const circle = L.circle([landfill.lat, landfill.lng], {
-                    radius: currentRadius * 1609.34, // Convert miles to meters
+                    radius: landfillRadius * 1609.34, // Convert miles to meters
                     color: 'var(--primary)',
                     fillColor: 'var(--primary)',
                     fillOpacity: 0.1,
@@ -3765,8 +4188,8 @@
                         data.lat, data.lng
                     );
                     
-                    // Check if well is within radius AND sent soil to this specific landfill
-                    if (distance <= currentRadius && data.destSite === landfill.site) {
+                    // Check if well is within THIS LANDFILL'S radius AND sent soil to this specific landfill
+                    if (distance <= landfillRadius && data.destSite === landfill.site) {
                         wellsInRange.add(wellIndex);
                         totalVolume += data.quantity;
                         
@@ -3782,6 +4205,9 @@
                         });
                     }
                 });
+                
+                // Update individual landfill statistics
+                updateLandfillStats(index);
             });
 
             // Use pre-calculated total outlier count from complete dataset
@@ -3789,6 +4215,9 @@
             
             // Update filtered out count
             updateFilteredOutCount();
+            
+            // Update combined results
+            updateCombinedResults();
         }
 
         // Update count of wells filtered out by distance from center
@@ -4665,8 +5094,9 @@ function updateCombinedResults() {
 
             const exportData = [];
             
-            selectedLandfills.forEach(index => {
+            selectedLandfills.forEach((settings, index) => {
                 const landfill = landfills[index];
+                const landfillRadius = settings.radius; // Use per-landfill radius
                 
                 wellMarkers.forEach(({ data }) => {
                     const distance = calculateDistance(
@@ -4674,8 +5104,8 @@ function updateCombinedResults() {
                         data.lat, data.lng
                     );
                     
-                    // Only include wells within radius that sent soil to this specific landfill
-                    if (distance <= currentRadius && data.destSite === landfill.site) {
+                    // Only include wells within THIS LANDFILL'S radius that sent soil to this specific landfill
+                    if (distance <= landfillRadius && data.destSite === landfill.site) {
                         exportData.push({
                             'API #': data.api,
                             'Lease': data.lease,
@@ -4691,7 +5121,7 @@ function updateCombinedResults() {
                             'Distance to Landfill (miles)': distance.toFixed(2),
                             'Total Quantity (CY)': data.quantity,
                             'Selected Landfill': landfill.site,
-                            'Search Radius (miles)': currentRadius,
+                            'Search Radius (miles)': landfillRadius,
                             'Date Filter': `${filterStartDate.toLocaleDateString()} to ${filterEndDate.toLocaleDateString()}`
                         });
                     }
@@ -4733,7 +5163,7 @@ function updateCombinedResults() {
                 'Total Wells in Range': exportData.length,
                 'Total Loads': totalLoads,
                 'Total Volume (CY)': exportData.reduce((sum, row) => sum + parseFloat(row['Total Quantity (CY)']), 0).toFixed(2),
-                'Search Radius (miles)': currentRadius,
+                'Search Radius': 'Per-Landfill (see details)',
                 'Number of Selected Landfills': selectedLandfills.size,
                 'Date Range': `${filterStartDate.toLocaleDateString()} to ${filterEndDate.toLocaleDateString()}`,
                 'Analysis Date': new Date().toLocaleDateString()
@@ -5813,11 +6243,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         }
 
         // Event listeners
-        document.getElementById('radiusSlider').addEventListener('input', (e) => {
-            currentRadius = parseInt(e.target.value);
-            document.getElementById('radiusValue').textContent = currentRadius;
-            updateAnalysis();
-        });
+        // Note: Radius sliders are now per-landfill, event handlers are inline in renderLandfillList()
 
         // Permian Basin filter checkbox
         document.getElementById('permianBasinOnly').addEventListener('change', (e) => {
