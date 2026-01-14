@@ -1881,6 +1881,15 @@
             return num.toFixed(decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         }
 
+        // Format landfill name with closed status if applicable
+        function formatLandfillName(landfillSite) {
+            // Check if this is the Reagan landfill (US Ecology)
+            if (landfillSite && landfillSite.toLowerCase().includes('reagan')) {
+                return landfillSite + ' (Closed)';
+            }
+            return landfillSite;
+        }
+
         // Initialize map
         function initMap() {
             map = L.map('map').setView([31.5, -102.5], 7);
@@ -3716,7 +3725,7 @@
                                id="landfill-checkbox-${index}" 
                                ${isSelected ? 'checked' : ''}>
                         <div class="landfill-header-info">
-                            <div class="landfill-header-name">${landfill.site}</div>
+                            <div class="landfill-header-name">${formatLandfillName(landfill.site)}</div>
                             <div class="landfill-header-company">${landfill.company}</div>
                         </div>
                         <span class="landfill-expand-icon">▼</span>
@@ -4228,7 +4237,7 @@
                 
                 marker.bindPopup(`
                     <div style="min-width: 200px;">
-                        <strong style="font-size: 1.1em;">${landfill.site}</strong><br>
+                        <strong style="font-size: 1.1em;">${formatLandfillName(landfill.site)}</strong><br>
                         <span style="color: var(--text-secondary);">${landfill.company}</span>
                         <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border);">
                             <button onclick="toggleLandfillFromMap(${index})" 
@@ -4251,7 +4260,7 @@
                 
                 // Add hover tooltip
                 marker.bindTooltip(`
-                    <strong>${landfill.site}</strong><br>
+                    <strong>${formatLandfillName(landfill.site)}</strong><br>
                     ${landfill.company}<br>
                     <span style="font-size: 0.9em; opacity: 0.8;">${isSelected ? '✓ Selected' : 'Click to select'}</span>
                 `, {
