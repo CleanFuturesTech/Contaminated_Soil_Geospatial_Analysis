@@ -6965,8 +6965,8 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                     
                     // Fit map to calculated bounds
                     map.fitBounds(bounds, { 
-                        padding: [100, 100],
-                        maxZoom: 9,
+                        padding: [50, 50],  // Reduced padding for closer zoom
+                        maxZoom: 10,        // Increased zoom level for closer view
                         animate: false
                     });
                     
