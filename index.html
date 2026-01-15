@@ -1752,38 +1752,67 @@
                         <!-- Save/Load Scenario -->
                         <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 2px solid var(--border);">
                             <div class="filter-info" style="margin-bottom: 1rem;">
-                                <strong>💾 Save/Load Scenario</strong>
+                                <strong>💾 Save/Load Scenarios</strong>
                             </div>
                             
-                            <div style="margin-bottom: 1rem;">
-                                <div class="stat-label" style="margin-bottom: 0.5rem;">Scenario Name</div>
-                                <input type="text" id="scenarioName" placeholder="e.g., 3-Facility West Texas"
-                                       style="width: 100%; padding: 0.75rem; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
-                            </div>
-                            
-                            <button class="filter-btn" id="saveScenarioBtn" style="width: 100%; margin-bottom: 0.5rem;">
-                                💾 Save Current Scenario
-                            </button>
-                            
-                            <div style="margin: 1rem 0;">
-                                <div class="stat-label" style="margin-bottom: 0.5rem;">Saved Scenarios</div>
-                                <select id="savedScenariosList" 
-                                        style="width: 100%; padding: 0.75rem; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); margin-bottom: 0.5rem;">
-                                    <option value="">-- Select a scenario --</option>
-                                </select>
-                            </div>
-                            
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                                <button class="filter-btn" id="loadScenarioBtn">
-                                    📂 Load
+                            <!-- File-Based Save/Load -->
+                            <div style="margin-bottom: 1.5rem; padding: 1rem; background: rgba(255, 107, 53, 0.1); border-radius: 8px; border: 1px solid rgba(255, 107, 53, 0.3);">
+                                <div style="font-weight: 600; margin-bottom: 0.75rem; color: var(--accent);">📁 File-Based (Recommended)</div>
+                                
+                                <button class="filter-btn" id="downloadScenarioBtn" style="width: 100%; margin-bottom: 0.5rem; background: var(--primary);">
+                                    💾 Download Scenario (.cfs)
                                 </button>
-                                <button class="filter-clear-btn" id="deleteScenarioBtn">
-                                    🗑️ Delete
+                                <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.75rem; padding-left: 0.5rem; font-style: italic;">
+                                    Lightweight - facility placements & settings only
+                                </div>
+                                
+                                <button class="filter-btn" id="downloadProjectBtn" style="width: 100%; margin-bottom: 0.5rem; background: var(--accent);">
+                                    💾 Download Complete Project (.cfp)
+                                </button>
+                                <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 1rem; padding-left: 0.5rem; font-style: italic;">
+                                    Includes all data - no need to reload Excel file
+                                </div>
+                                
+                                <input type="file" id="uploadScenarioFile" accept=".cfs,.cfp" style="display: none;">
+                                <button class="filter-btn" id="uploadScenarioBtn" style="width: 100%; background: #2ecc71;">
+                                    📂 Upload Scenario/Project File
                                 </button>
                             </div>
                             
-                            <div style="margin-top: 1rem; font-size: 0.75rem; color: var(--text-secondary); font-style: italic;">
-                                Scenarios are saved in your browser and include facility locations, service radii, and configuration settings.
+                            <!-- Quick Save/Load (localStorage) -->
+                            <div style="padding: 1rem; background: rgba(52, 152, 219, 0.1); border-radius: 8px; border: 1px solid rgba(52, 152, 219, 0.3);">
+                                <div style="font-weight: 600; margin-bottom: 0.75rem; color: #3498db;">⚡ Quick Save/Load</div>
+                                
+                                <div style="margin-bottom: 1rem;">
+                                    <div class="stat-label" style="margin-bottom: 0.5rem;">Scenario Name</div>
+                                    <input type="text" id="scenarioName" placeholder="e.g., 3-Facility West Texas"
+                                           style="width: 100%; padding: 0.75rem; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+                                </div>
+                                
+                                <button class="filter-btn" id="saveScenarioBtn" style="width: 100%; margin-bottom: 0.75rem;">
+                                    💾 Quick Save to Browser
+                                </button>
+                                
+                                <div style="margin-bottom: 0.5rem;">
+                                    <div class="stat-label" style="margin-bottom: 0.5rem;">Recent Scenarios</div>
+                                    <select id="savedScenariosList" 
+                                            style="width: 100%; padding: 0.75rem; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); margin-bottom: 0.5rem;">
+                                        <option value="">-- Select a scenario --</option>
+                                    </select>
+                                </div>
+                                
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                                    <button class="filter-btn" id="loadScenarioBtn">
+                                        📂 Load
+                                    </button>
+                                    <button class="filter-clear-btn" id="deleteScenarioBtn">
+                                        🗑️ Delete
+                                    </button>
+                                </div>
+                                
+                                <div style="margin-top: 0.75rem; font-size: 0.65rem; color: var(--text-secondary); font-style: italic;">
+                                    Quick saves are stored in browser only
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -6968,6 +6997,336 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         document.getElementById('saveScenarioBtn').addEventListener('click', saveScenario);
         document.getElementById('loadScenarioBtn').addEventListener('click', loadScenario);
         document.getElementById('deleteScenarioBtn').addEventListener('click', deleteScenario);
+        
+        // ========================================
+        // FILE-BASED SCENARIO/PROJECT SAVE/LOAD
+        // ========================================
+        
+        function downloadScenario() {
+            if (facilities.length === 0) {
+                alert('Please add at least one facility before saving.');
+                return;
+            }
+            
+            const scenarioName = document.getElementById('scenarioName').value.trim() || 'Untitled_Scenario';
+            
+            // Create .cfs file (lightweight - just facilities and config)
+            const cfsData = {
+                version: "1.0",
+                type: "contaminated-facility-scenario",
+                metadata: {
+                    name: scenarioName,
+                    created: new Date().toISOString(),
+                    application: "Contaminated Soil Facility Analyzer"
+                },
+                facilities: facilities.map(f => ({
+                    id: f.id,
+                    lat: f.marker.getLatLng().lat,
+                    lng: f.marker.getLatLng().lng,
+                    serviceRadius: f.serviceRadius,
+                    color: f.color
+                })),
+                config: {
+                    marketShare: parseFloat(document.getElementById('facilityMarketShare').textContent),
+                    disposalPrice: parseFloat(document.getElementById('facilityDisposalPrice').value),
+                    backfillPrice: parseFloat(document.getElementById('facilityBackfillPrice').value),
+                    backfillPercentage: parseFloat(document.getElementById('facilityBackfillPercentage').value),
+                    minSpacing: parseFloat(document.getElementById('facilityMinSpacing').textContent)
+                },
+                nextFacilityId: nextFacilityId
+            };
+            
+            // Create download
+            const blob = new Blob([JSON.stringify(cfsData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${scenarioName.replace(/[^a-z0-9]/gi, '_')}.cfs`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            // Visual feedback
+            const btn = document.getElementById('downloadScenarioBtn');
+            const originalText = btn.textContent;
+            btn.textContent = '✅ Downloaded!';
+            setTimeout(() => {
+                btn.textContent = originalText;
+            }, 2000);
+        }
+        
+        function downloadProject() {
+            if (facilities.length === 0) {
+                alert('Please add at least one facility before saving.');
+                return;
+            }
+            
+            if (!wellData || wellData.length === 0) {
+                alert('No data loaded. Please upload Excel file first.');
+                return;
+            }
+            
+            const projectName = document.getElementById('scenarioName').value.trim() || 'Untitled_Project';
+            
+            // Create .cfp file (complete - includes all data)
+            const cfpData = {
+                version: "1.0",
+                type: "contaminated-facility-project",
+                metadata: {
+                    name: projectName,
+                    created: new Date().toISOString(),
+                    application: "Contaminated Soil Facility Analyzer",
+                    dataRecords: wellData.length,
+                    dateRange: {
+                        start: minDate ? minDate.toISOString() : null,
+                        end: maxDate ? maxDate.toISOString() : null
+                    }
+                },
+                facilities: facilities.map(f => ({
+                    id: f.id,
+                    lat: f.marker.getLatLng().lat,
+                    lng: f.marker.getLatLng().lng,
+                    serviceRadius: f.serviceRadius,
+                    color: f.color
+                })),
+                config: {
+                    marketShare: parseFloat(document.getElementById('facilityMarketShare').textContent),
+                    disposalPrice: parseFloat(document.getElementById('facilityDisposalPrice').value),
+                    backfillPrice: parseFloat(document.getElementById('facilityBackfillPrice').value),
+                    backfillPercentage: parseFloat(document.getElementById('facilityBackfillPercentage').value),
+                    minSpacing: parseFloat(document.getElementById('facilityMinSpacing').textContent)
+                },
+                nextFacilityId: nextFacilityId,
+                // Include complete dataset
+                data: {
+                    wellData: wellData,
+                    rawDailyData: rawDailyData,
+                    generators: Array.from(generators),
+                    transporters: Array.from(transporters),
+                    landfills: landfills
+                },
+                filters: {
+                    dateRange: {
+                        start: filterStartDate ? filterStartDate.toISOString() : null,
+                        end: filterEndDate ? filterEndDate.toISOString() : null
+                    },
+                    selectedGenerators: Array.from(selectedGenerators),
+                    selectedTransporters: Array.from(selectedTransporters)
+                }
+            };
+            
+            // Create download
+            const blob = new Blob([JSON.stringify(cfpData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${projectName.replace(/[^a-z0-9]/gi, '_')}.cfp`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            // Visual feedback
+            const btn = document.getElementById('downloadProjectBtn');
+            const originalText = btn.textContent;
+            btn.textContent = '✅ Downloaded!';
+            setTimeout(() => {
+                btn.textContent = originalText;
+            }, 2000);
+        }
+        
+        function uploadScenarioFile() {
+            const fileInput = document.getElementById('uploadScenarioFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file to upload.');
+                return;
+            }
+            
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    
+                    // Validate file type
+                    if (data.type === 'contaminated-facility-scenario') {
+                        loadScenarioFromFile(data);
+                    } else if (data.type === 'contaminated-facility-project') {
+                        loadProjectFromFile(data);
+                    } else {
+                        alert('Invalid file format. Please select a .cfs or .cfp file.');
+                        return;
+                    }
+                    
+                    // Clear file input
+                    fileInput.value = '';
+                    
+                } catch (error) {
+                    console.error('Error loading file:', error);
+                    alert('Error loading file: ' + error.message);
+                }
+            };
+            
+            reader.readAsText(file);
+        }
+        
+        function loadScenarioFromFile(data) {
+            // Check if we have data loaded
+            if (!wellData || wellData.length === 0) {
+                if (!confirm('No data is currently loaded. This scenario file requires you to load your Excel data first. Continue loading scenario?')) {
+                    return;
+                }
+            }
+            
+            // Clear existing facilities
+            clearAllFacilities();
+            
+            // Restore from file
+            nextFacilityId = data.nextFacilityId || 1;
+            
+            // Restore configuration
+            document.getElementById('facilityMarketShare').textContent = data.config.marketShare;
+            document.getElementById('facilityMarketShareSlider').value = data.config.marketShare;
+            document.getElementById('facilityDisposalPrice').value = data.config.disposalPrice;
+            document.getElementById('facilityBackfillPrice').value = data.config.backfillPrice;
+            document.getElementById('facilityBackfillPercentage').value = data.config.backfillPercentage;
+            if (data.config.minSpacing) {
+                document.getElementById('facilityMinSpacing').textContent = data.config.minSpacing;
+                document.getElementById('facilityMinSpacingSlider').value = data.config.minSpacing;
+            }
+            
+            facilitiesConfig.marketShare = data.config.marketShare;
+            facilitiesConfig.disposalPrice = data.config.disposalPrice;
+            facilitiesConfig.backfillPrice = data.config.backfillPrice;
+            facilitiesConfig.backfillPercentage = data.config.backfillPercentage;
+            
+            // Recreate facilities
+            data.facilities.forEach(facilityData => {
+                const facility = {
+                    id: facilityData.id,
+                    lat: facilityData.lat,
+                    lng: facilityData.lng,
+                    color: facilityData.color,
+                    serviceRadius: facilityData.serviceRadius,
+                    marker: null,
+                    circle: null,
+                    resizeHandle: null,
+                    wells: [],
+                    totalVolume: 0,
+                    capturedVolume: 0,
+                    disposalRevenue: 0,
+                    backfillRevenue: 0,
+                    totalRevenue: 0
+                };
+                
+                facilities.push(facility);
+                createFacilityMarker(facility);
+            });
+            
+            // Recalculate if we have data
+            if (wellData && wellData.length > 0) {
+                recalculateFacilities();
+                updateFacilitiesDisplay();
+            }
+            
+            // Update scenario name
+            document.getElementById('scenarioName').value = data.metadata.name;
+            
+            alert(`Scenario "${data.metadata.name}" loaded successfully!\n\nCreated: ${new Date(data.metadata.created).toLocaleString()}`);
+        }
+        
+        function loadProjectFromFile(data) {
+            // This is a complete project - includes all data
+            
+            // Clear existing facilities
+            clearAllFacilities();
+            
+            // Restore configuration
+            nextFacilityId = data.nextFacilityId || 1;
+            
+            document.getElementById('facilityMarketShare').textContent = data.config.marketShare;
+            document.getElementById('facilityMarketShareSlider').value = data.config.marketShare;
+            document.getElementById('facilityDisposalPrice').value = data.config.disposalPrice;
+            document.getElementById('facilityBackfillPrice').value = data.config.backfillPrice;
+            document.getElementById('facilityBackfillPercentage').value = data.config.backfillPercentage;
+            if (data.config.minSpacing) {
+                document.getElementById('facilityMinSpacing').textContent = data.config.minSpacing;
+                document.getElementById('facilityMinSpacingSlider').value = data.config.minSpacing;
+            }
+            
+            facilitiesConfig.marketShare = data.config.marketShare;
+            facilitiesConfig.disposalPrice = data.config.disposalPrice;
+            facilitiesConfig.backfillPrice = data.config.backfillPrice;
+            facilitiesConfig.backfillPercentage = data.config.backfillPercentage;
+            
+            // Restore complete dataset
+            wellData = data.data.wellData;
+            rawDailyData = data.data.rawDailyData;
+            generators = new Set(data.data.generators);
+            transporters = new Set(data.data.transporters);
+            landfills = data.data.landfills;
+            
+            // Restore date range
+            if (data.metadata.dateRange.start && data.metadata.dateRange.end) {
+                minDate = new Date(data.metadata.dateRange.start);
+                maxDate = new Date(data.metadata.dateRange.end);
+                filterStartDate = new Date(data.filters.dateRange.start);
+                filterEndDate = new Date(data.filters.dateRange.end);
+            }
+            
+            // Restore filters
+            selectedGenerators = new Set(data.filters.selectedGenerators);
+            selectedTransporters = new Set(data.filters.selectedTransporters);
+            
+            // Update UI
+            renderGeneratorList();
+            renderTransporterList();
+            initializeDateFilters();
+            
+            // Recreate facilities
+            data.facilities.forEach(facilityData => {
+                const facility = {
+                    id: facilityData.id,
+                    lat: facilityData.lat,
+                    lng: facilityData.lng,
+                    color: facilityData.color,
+                    serviceRadius: facilityData.serviceRadius,
+                    marker: null,
+                    circle: null,
+                    resizeHandle: null,
+                    wells: [],
+                    totalVolume: 0,
+                    capturedVolume: 0,
+                    disposalRevenue: 0,
+                    backfillRevenue: 0,
+                    totalRevenue: 0
+                };
+                
+                facilities.push(facility);
+                createFacilityMarker(facility);
+            });
+            
+            // Apply filters and recalculate
+            applyFiltersAndUpdate();
+            recalculateFacilities();
+            updateFacilitiesDisplay();
+            
+            // Update scenario name
+            document.getElementById('scenarioName').value = data.metadata.name;
+            
+            alert(`Complete Project "${data.metadata.name}" loaded successfully!\n\nCreated: ${new Date(data.metadata.created).toLocaleString()}\nRecords: ${data.metadata.dataRecords.toLocaleString()}`);
+        }
+        
+        // Event listeners for file-based save/load
+        document.getElementById('downloadScenarioBtn').addEventListener('click', downloadScenario);
+        document.getElementById('downloadProjectBtn').addEventListener('click', downloadProject);
+        document.getElementById('uploadScenarioBtn').addEventListener('click', () => {
+            document.getElementById('uploadScenarioFile').click();
+        });
+        document.getElementById('uploadScenarioFile').addEventListener('change', uploadScenarioFile);
 
         // Initialize and verify libraries
         console.log('=== INITIALIZATION ===');
