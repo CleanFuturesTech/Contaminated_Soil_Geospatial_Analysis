@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.02                                                ║
+    ║  VERSION: 1.03                                                ║
     ║  Last Updated: January 2025                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -15,7 +15,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.02</title>
+    <title>Contaminated Soil Geospatial Analysis v1.03</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
@@ -1273,7 +1273,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle">v1.02</div>
+                <div class="subtitle">v1.03</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -1988,7 +1988,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.02";
+        const APP_VERSION = "1.03";
         console.log(`%c Contaminated Soil Geospatial Analysis v${APP_VERSION} `, 'background: #0a4d3c; color: white; font-size: 14px; padding: 4px 8px; border-radius: 4px;');
         // ============================================================
         
@@ -7608,18 +7608,22 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         
         function handleCompareScenarios(event) {
             const files = event.target.files;
-            console.log('Compare scenarios triggered, files:', files?.length);
+            const totalFiles = files.length; // Capture count before async operations
+            console.log('Compare scenarios triggered, files:', totalFiles);
             
-            if (!files || files.length === 0) {
+            if (!files || totalFiles === 0) {
                 console.log('No files selected');
                 return;
             }
             
             // Limit to 5 comparison scenarios
-            if (files.length > 5) {
+            if (totalFiles > 5) {
                 alert('Please select up to 5 scenario files for comparison.');
                 return;
             }
+            
+            // Reset file input immediately (before async reads)
+            event.target.value = '';
             
             const scenarios = [];
             let filesProcessed = 0;
@@ -7676,9 +7680,9 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                     }
                     
                     filesProcessed++;
-                    console.log('Files processed:', filesProcessed, 'of', files.length);
+                    console.log('Files processed:', filesProcessed, 'of', totalFiles);
                     
-                    if (filesProcessed === files.length) {
+                    if (filesProcessed === totalFiles) {
                         // All files processed
                         if (fileErrors.length > 0) {
                             alert('Some files had errors:\n' + fileErrors.join('\n'));
@@ -7698,7 +7702,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                     fileErrors.push(file.name + ': Failed to read file');
                     filesProcessed++;
                     
-                    if (filesProcessed === files.length) {
+                    if (filesProcessed === totalFiles) {
                         if (scenarios.length > 0) {
                             runScenarioComparison(scenarios);
                         } else {
@@ -7709,9 +7713,6 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 
                 reader.readAsText(file);
             });
-            
-            // Reset file input
-            event.target.value = '';
         }
         
         function runScenarioComparison(scenarios) {
