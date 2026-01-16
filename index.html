@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.01                                                ║
+    ║  VERSION: 1.02                                                ║
     ║  Last Updated: January 2025                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -15,7 +15,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.01</title>
+    <title>Contaminated Soil Geospatial Analysis v1.02</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
@@ -1273,7 +1273,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle">v1.01</div>
+                <div class="subtitle">v1.02</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -1988,7 +1988,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.01";
+        const APP_VERSION = "1.02";
         console.log(`%c Contaminated Soil Geospatial Analysis v${APP_VERSION} `, 'background: #0a4d3c; color: white; font-size: 14px; padding: 4px 8px; border-radius: 4px;');
         // ============================================================
         
@@ -7608,7 +7608,12 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         
         function handleCompareScenarios(event) {
             const files = event.target.files;
-            if (!files || files.length === 0) return;
+            console.log('Compare scenarios triggered, files:', files?.length);
+            
+            if (!files || files.length === 0) {
+                console.log('No files selected');
+                return;
+            }
             
             // Limit to 5 comparison scenarios
             if (files.length > 5) {
@@ -7618,9 +7623,11 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             
             const scenarios = [];
             let filesProcessed = 0;
+            let fileErrors = [];
             
             // Add current scenario first
             if (facilities.length > 0) {
+                console.log('Adding current scenario with', facilities.length, 'facilities');
                 const currentScenario = {
                     name: 'Current Scenario',
                     isCurrent: true,
@@ -7639,14 +7646,24 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                     }
                 };
                 scenarios.push(currentScenario);
+            } else {
+                console.log('No current facilities - will compare selected files only');
             }
             
             // Read each selected file
             Array.from(files).forEach((file, index) => {
+                console.log('Reading file:', file.name);
                 const reader = new FileReader();
+                
                 reader.onload = function(e) {
                     try {
                         const data = JSON.parse(e.target.result);
+                        console.log('Parsed file:', file.name, 'facilities:', data.facilities?.length);
+                        
+                        if (!data.facilities || !data.config) {
+                            throw new Error('Invalid scenario file format - missing facilities or config');
+                        }
+                        
                         scenarios.push({
                             name: data.metadata?.name || file.name.replace('.cfs', ''),
                             isCurrent: false,
@@ -7655,14 +7672,41 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                         });
                     } catch (err) {
                         console.error('Error parsing scenario file:', file.name, err);
+                        fileErrors.push(file.name + ': ' + err.message);
                     }
                     
                     filesProcessed++;
+                    console.log('Files processed:', filesProcessed, 'of', files.length);
+                    
                     if (filesProcessed === files.length) {
-                        // All files processed, run comparison
-                        runScenarioComparison(scenarios);
+                        // All files processed
+                        if (fileErrors.length > 0) {
+                            alert('Some files had errors:\n' + fileErrors.join('\n'));
+                        }
+                        
+                        if (scenarios.length > 0) {
+                            console.log('Running comparison with', scenarios.length, 'scenarios');
+                            runScenarioComparison(scenarios);
+                        } else {
+                            alert('No valid scenarios to compare.');
+                        }
                     }
                 };
+                
+                reader.onerror = function(err) {
+                    console.error('FileReader error for:', file.name, err);
+                    fileErrors.push(file.name + ': Failed to read file');
+                    filesProcessed++;
+                    
+                    if (filesProcessed === files.length) {
+                        if (scenarios.length > 0) {
+                            runScenarioComparison(scenarios);
+                        } else {
+                            alert('Failed to read scenario files.');
+                        }
+                    }
+                };
+                
                 reader.readAsText(file);
             });
             
@@ -7671,51 +7715,64 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         }
         
         function runScenarioComparison(scenarios) {
+            console.log('runScenarioComparison called with', scenarios.length, 'scenarios');
+            
             if (scenarios.length === 0) {
                 alert('No scenarios to compare.');
                 return;
             }
             
-            // Calculate metrics for each scenario
-            const periodDays = Math.ceil((filterEndDate - filterStartDate) / (1000 * 60 * 60 * 24));
-            const periodMonths = periodDays / 30.44;
-            const businessDaysPerYear = 252;
-            const annualizationFactor = 365 / periodDays;
-            
-            comparisonData = scenarios.map(scenario => {
-                // Calculate stats for this scenario's facility configuration
-                const stats = calculateScenarioStats(scenario.facilities, scenario.config);
+            try {
+                // Calculate metrics for each scenario
+                const periodDays = Math.ceil((filterEndDate - filterStartDate) / (1000 * 60 * 60 * 24));
+                const periodMonths = periodDays / 30.44;
+                const businessDaysPerYear = 252;
+                const annualizationFactor = 365 / periodDays;
                 
-                // Calculate annualized values
-                const monthlyAvgCaptured = stats.capturedVolume / periodMonths;
-                const annualizedCaptured = monthlyAvgCaptured * 12;
-                const cyPerBusinessDay = annualizedCaptured / businessDaysPerYear;
+                console.log('Period:', periodDays, 'days,', periodMonths.toFixed(1), 'months');
                 
-                // Calculate revenues
-                const disposalRevenue = annualizedCaptured * scenario.config.disposalPrice;
-                const backfillVolume = annualizedCaptured * (scenario.config.backfillPercentage / 100);
-                const backfillRevenue = backfillVolume * scenario.config.backfillPrice;
-                const totalRevenue = disposalRevenue + backfillRevenue;
+                comparisonData = scenarios.map(scenario => {
+                    console.log('Calculating stats for:', scenario.name);
+                    // Calculate stats for this scenario's facility configuration
+                    const stats = calculateScenarioStats(scenario.facilities, scenario.config);
+                    
+                    // Calculate annualized values
+                    const monthlyAvgCaptured = stats.capturedVolume / periodMonths;
+                    const annualizedCaptured = monthlyAvgCaptured * 12;
+                    const cyPerBusinessDay = annualizedCaptured / businessDaysPerYear;
+                    
+                    // Calculate revenues
+                    const disposalRevenue = annualizedCaptured * scenario.config.disposalPrice;
+                    const backfillVolume = annualizedCaptured * (scenario.config.backfillPercentage / 100);
+                    const backfillRevenue = backfillVolume * scenario.config.backfillPrice;
+                    const totalRevenue = disposalRevenue + backfillRevenue;
+                    
+                    return {
+                        name: scenario.name,
+                        isCurrent: scenario.isCurrent,
+                        facilityCount: scenario.facilities.length,
+                        totalWells: stats.totalWells,
+                        periodTotalVolume: stats.totalVolume,
+                        periodCapturedVolume: stats.capturedVolume,
+                        annualizedCaptured: annualizedCaptured,
+                        cyPerBusinessDay: cyPerBusinessDay,
+                        disposalRevenue: disposalRevenue,
+                        backfillRevenue: backfillRevenue,
+                        totalRevenue: totalRevenue,
+                        config: scenario.config,
+                        facilityDetails: stats.facilityDetails
+                    };
+                });
                 
-                return {
-                    name: scenario.name,
-                    isCurrent: scenario.isCurrent,
-                    facilityCount: scenario.facilities.length,
-                    totalWells: stats.totalWells,
-                    periodTotalVolume: stats.totalVolume,
-                    periodCapturedVolume: stats.capturedVolume,
-                    annualizedCaptured: annualizedCaptured,
-                    cyPerBusinessDay: cyPerBusinessDay,
-                    disposalRevenue: disposalRevenue,
-                    backfillRevenue: backfillRevenue,
-                    totalRevenue: totalRevenue,
-                    config: scenario.config,
-                    facilityDetails: stats.facilityDetails
-                };
-            });
-            
-            // Display comparison
-            displayComparison(comparisonData, periodMonths);
+                console.log('Comparison data calculated:', comparisonData.length, 'scenarios');
+                
+                // Display comparison
+                displayComparison(comparisonData, periodMonths);
+                
+            } catch (err) {
+                console.error('Error in runScenarioComparison:', err);
+                alert('Error running comparison: ' + err.message);
+            }
         }
         
         function calculateScenarioStats(scenarioFacilities, config) {
@@ -7785,22 +7842,29 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         }
         
         function displayComparison(data, periodMonths) {
-            const content = document.getElementById('comparisonContent');
+            console.log('displayComparison called with', data.length, 'scenarios');
             
-            // Find best values for highlighting
-            const maxRevenue = Math.max(...data.map(d => d.totalRevenue));
-            const maxCY = Math.max(...data.map(d => d.cyPerBusinessDay));
-            
-            let html = `
-                <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--bg-dark); border-radius: 8px;">
-                    <div style="font-size: 0.9rem; color: var(--text-secondary);">
-                        <strong>Data Period:</strong> ${periodMonths.toFixed(1)} months | 
-                        <strong>Scenarios Compared:</strong> ${data.length} |
-                        <strong>Filter:</strong> ${filterStartDate.toLocaleDateString()} - ${filterEndDate.toLocaleDateString()}
-                    </div>
-                </div>
+            try {
+                const content = document.getElementById('comparisonContent');
                 
-                <div style="overflow-x: auto;">
+                if (!content) {
+                    throw new Error('Comparison content element not found');
+                }
+                
+                // Find best values for highlighting
+                const maxRevenue = Math.max(...data.map(d => d.totalRevenue));
+                const maxCY = Math.max(...data.map(d => d.cyPerBusinessDay));
+                
+                let html = `
+                    <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--bg-dark); border-radius: 8px;">
+                        <div style="font-size: 0.9rem; color: var(--text-secondary);">
+                            <strong>Data Period:</strong> ${periodMonths.toFixed(1)} months | 
+                            <strong>Scenarios Compared:</strong> ${data.length} |
+                            <strong>Filter:</strong> ${filterStartDate.toLocaleDateString()} - ${filterEndDate.toLocaleDateString()}
+                        </div>
+                    </div>
+                    
+                    <div style="overflow-x: auto;">
                     <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
                         <thead>
                             <tr style="background: var(--primary); color: white;">
@@ -7920,7 +7984,14 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             content.innerHTML = html;
             
             // Show modal
+            console.log('Showing comparison modal');
             document.getElementById('comparisonModal').style.display = 'block';
+            console.log('Modal should now be visible');
+            
+            } catch (err) {
+                console.error('Error in displayComparison:', err);
+                alert('Error displaying comparison: ' + err.message);
+            }
         }
         
         function closeComparisonModal() {
