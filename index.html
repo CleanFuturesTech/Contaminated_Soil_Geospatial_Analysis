@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.03                                                ║
+    ║  VERSION: 1.04                                                ║
     ║  Last Updated: January 2025                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -15,7 +15,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.03</title>
+    <title>Contaminated Soil Geospatial Analysis v1.04</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
@@ -1273,7 +1273,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle">v1.03</div>
+                <div class="subtitle">v1.04</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -1988,7 +1988,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.03";
+        const APP_VERSION = "1.04";
         console.log(`%c Contaminated Soil Geospatial Analysis v${APP_VERSION} `, 'background: #0a4d3c; color: white; font-size: 14px; padding: 4px 8px; border-radius: 4px;');
         // ============================================================
         
@@ -7607,11 +7607,11 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         let comparisonData = []; // Store comparison results for export
         
         function handleCompareScenarios(event) {
-            const files = event.target.files;
-            const totalFiles = files.length; // Capture count before async operations
+            const fileList = event.target.files;
+            const totalFiles = fileList.length;
             console.log('Compare scenarios triggered, files:', totalFiles);
             
-            if (!files || totalFiles === 0) {
+            if (!fileList || totalFiles === 0) {
                 console.log('No files selected');
                 return;
             }
@@ -7622,7 +7622,12 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 return;
             }
             
-            // Reset file input immediately (before async reads)
+            // IMPORTANT: Convert FileList to Array BEFORE resetting input
+            // FileList becomes empty when input is reset
+            const files = Array.from(fileList);
+            console.log('Files array created with', files.length, 'files');
+            
+            // Reset file input now (safe because we have a copy)
             event.target.value = '';
             
             const scenarios = [];
@@ -7655,7 +7660,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             }
             
             // Read each selected file
-            Array.from(files).forEach((file, index) => {
+            files.forEach((file, index) => {
                 console.log('Reading file:', file.name);
                 const reader = new FileReader();
                 
