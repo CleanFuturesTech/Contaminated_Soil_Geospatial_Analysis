@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.05                                                ║
+    ║  VERSION: 1.06                                                ║
     ║  Last Updated: January 2025                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -15,7 +15,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.05</title>
+    <title>Contaminated Soil Geospatial Analysis v1.06</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
@@ -1273,7 +1273,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle">v1.05</div>
+                <div class="subtitle">v1.06</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -1952,7 +1952,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.05";
+        const APP_VERSION = "1.06";
         console.log(`%c Contaminated Soil Geospatial Analysis v${APP_VERSION} `, 'background: #0a4d3c; color: white; font-size: 14px; padding: 4px 8px; border-radius: 4px;');
         // ============================================================
         
@@ -4035,17 +4035,156 @@
             }
         }
 
-        // Update landfill radius
+        // Debounce timer for landfill radius updates
+        let landfillRadiusDebounceTimer = null;
+        
+        // Update landfill radius - with debounced full analysis
         function updateLandfillRadius(index, newRadius) {
             const radius = parseInt(newRadius);
             
             if (selectedLandfills.has(index)) {
                 selectedLandfills.get(index).radius = radius;
-                document.getElementById(`radius-value-${index}`).textContent = `${radius} miles`;
+                document.getElementById(`radius-value-${index}`).textContent = `${radius} / ${landfills[index].maxRadius} miles`;
                 
-                // Update analysis with new radius
-                updateAnalysis();
+                // Immediately update the circle on the map (visual feedback)
+                updateCircleRadiusOnly(index, radius);
+                
+                // Debounce the heavy analysis update (yellow dots, stats)
+                if (landfillRadiusDebounceTimer) {
+                    clearTimeout(landfillRadiusDebounceTimer);
+                }
+                landfillRadiusDebounceTimer = setTimeout(() => {
+                    updateYellowDotsAndStats();
+                }, 100); // 100ms debounce
             }
+        }
+        
+        // Update just the circle radius on the map (fast visual update)
+        function updateCircleRadiusOnly(index, radius) {
+            // Find and update the circle for this landfill
+            radiusCircles.forEach(item => {
+                if (item.landfillIndex === index && item.setRadius) {
+                    // This is the circle (not the handle)
+                    item.setRadius(radius * 1609.34);
+                } else if (item.landfillIndex === index && item.setLatLng) {
+                    // This is the handle - reposition it
+                    const landfill = landfills[index];
+                    const angleInRadians = 45 * (Math.PI / 180);
+                    const radiusInMeters = radius * 1609.34;
+                    const handleLat = landfill.lat + (radiusInMeters / 111320) * Math.cos(angleInRadians);
+                    const handleLng = landfill.lng + (radiusInMeters / (111320 * Math.cos(landfill.lat * Math.PI / 180))) * Math.sin(angleInRadians);
+                    item.setLatLng([handleLat, handleLng]);
+                }
+            });
+        }
+        
+        // Update yellow dots and stats (heavier operation, debounced)
+        function updateYellowDotsAndStats() {
+            // First reset all markers to base colors
+            if (facilities.length > 0) {
+                updateWellColorsByFacility();
+            } else {
+                const filteredKeys = new Set(filteredWellData.map(w => getWellKey(w)));
+                wellMarkers.forEach(({ marker, data }) => {
+                    const wellKey = getWellKey(data);
+                    const isFiltered = !filteredKeys.has(wellKey);
+                    marker.setStyle({
+                        fillColor: isFiltered ? '#808080' : '#4a9eff',
+                        radius: 4,
+                        opacity: isFiltered ? 0.3 : 0.8,
+                        fillOpacity: isFiltered ? 0.3 : 0.6
+                    });
+                });
+            }
+            
+            if (selectedLandfills.size === 0) return;
+            
+            // Create filtered keys set once
+            const filteredKeys = new Set(filteredWellData.map(w => getWellKey(w)));
+            
+            // Highlight wells in range for ALL selected landfills
+            selectedLandfills.forEach((settings, index) => {
+                const landfill = landfills[index];
+                const landfillRadius = settings.radius;
+                
+                wellMarkers.forEach(({ marker, data }) => {
+                    const wellKey = getWellKey(data);
+                    if (!filteredKeys.has(wellKey)) return;
+                    
+                    // Check center distance
+                    if (datasetCenter) {
+                        const distFromCenter = calculateDistance(
+                            datasetCenter.lat, datasetCenter.lng,
+                            data.lat, data.lng
+                        );
+                        if (distFromCenter > maxDistanceFromCenter) return;
+                    }
+                    
+                    const distance = calculateDistance(
+                        landfill.lat, landfill.lng,
+                        data.lat, data.lng
+                    );
+                    
+                    if (distance <= landfillRadius && data.destSite === landfill.site) {
+                        marker.setStyle({
+                            fillColor: '#ffd700',
+                            radius: 6,
+                            opacity: 0.9,
+                            fillOpacity: 0.8
+                        });
+                    }
+                });
+                
+                // Update stats for this landfill
+                updateLandfillStats(index);
+            });
+            
+            // Update overall stats
+            let wellsInRange = new Set();
+            let totalVolume = 0;
+            let coordSourceVolumes = {
+                'API Lookup': 0,
+                'EA Data': 0,
+                'County Centroid': 0,
+                'Landfill County': 0
+            };
+            
+            selectedLandfills.forEach((settings, index) => {
+                const landfill = landfills[index];
+                const landfillRadius = settings.radius;
+                
+                wellMarkers.forEach(({ marker, data }, wellIndex) => {
+                    const wellKey = getWellKey(data);
+                    if (!filteredKeys.has(wellKey)) return;
+                    
+                    if (datasetCenter) {
+                        const distFromCenter = calculateDistance(
+                            datasetCenter.lat, datasetCenter.lng,
+                            data.lat, data.lng
+                        );
+                        if (distFromCenter > maxDistanceFromCenter) return;
+                    }
+                    
+                    const distance = calculateDistance(
+                        landfill.lat, landfill.lng,
+                        data.lat, data.lng
+                    );
+                    
+                    if (distance <= landfillRadius && data.destSite === landfill.site) {
+                        wellsInRange.add(wellIndex);
+                        totalVolume += data.quantity;
+                        
+                        const source = data.coordSource || 'Unknown';
+                        if (coordSourceVolumes.hasOwnProperty(source)) {
+                            coordSourceVolumes[source] += data.quantity;
+                        }
+                    }
+                });
+            });
+            
+            updateStats(wellsInRange.size, totalVolume, coordSourceVolumes, totalOutlierCount);
+            updateFilteredOutCount();
+            updateCombinedResults();
         }
 
         // Calculate statistics for a specific landfill
@@ -4571,8 +4710,8 @@
                 
                 // Update statistics and combined results after drag ends
                 handle.on('dragend', function(e) {
-                    updateLandfillStats(index);
-                    updateCombinedResults();
+                    // Use the debounced yellow dots and stats update for consistency
+                    updateYellowDotsAndStats();
                 });
 
                 // Create Set of filtered well keys for checking
