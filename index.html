@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.09                                                ║
+    ║  VERSION: 1.10                                                ║
     ║  Last Updated: January 2025                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -15,7 +15,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.09</title>
+    <title>Contaminated Soil Geospatial Analysis v1.10</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
@@ -1273,7 +1273,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle">v1.09</div>
+                <div class="subtitle">v1.10</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -1952,7 +1952,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.09";
+        const APP_VERSION = "1.10";
         console.log(`%c Contaminated Soil Geospatial Analysis v${APP_VERSION} `, 'background: #0a4d3c; color: white; font-size: 14px; padding: 4px 8px; border-radius: 4px;');
         // ============================================================
         
@@ -2066,15 +2066,21 @@
         function initMap() {
             map = L.map('map').setView([31.5, -102.5], 7);
             
-            // Esri World Imagery - satellite imagery layer
+            // Esri World Imagery - satellite imagery base layer
             L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+                attribution: 'Tiles © Esri',
                 maxZoom: 19
             }).addTo(map);
             
-            // Add labels overlay for readability
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+            // Esri World Transportation - roads and highways
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
                 maxZoom: 19
+            }).addTo(map);
+            
+            // Esri World Boundaries and Places - labels for cities, regions
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: ' | Labels © Esri'
             }).addTo(map);
 
             // Add legend
@@ -7379,7 +7385,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         // FILE-BASED SCENARIO/PROJECT SAVE/LOAD
         // ========================================
         
-        async function downloadScenario() {
+        function downloadScenario() {
             if (facilities.length === 0) {
                 alert('Please add at least one facility before saving.');
                 return;
@@ -7426,38 +7432,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             
             const jsonContent = JSON.stringify(cfsData, null, 2);
             
-            // Try File System Access API first (allows folder selection)
-            if ('showSaveFilePicker' in window) {
-                try {
-                    const handle = await window.showSaveFilePicker({
-                        suggestedName: fileName,
-                        types: [{
-                            description: 'Contaminated Facility Scenario',
-                            accept: { 'application/json': ['.cfs'] }
-                        }]
-                    });
-                    const writable = await handle.createWritable();
-                    await writable.write(jsonContent);
-                    await writable.close();
-                    
-                    // Visual feedback
-                    const btn = document.getElementById('downloadScenarioBtn');
-                    const originalText = btn.textContent;
-                    btn.textContent = '✅ Saved!';
-                    setTimeout(() => {
-                        btn.textContent = originalText;
-                    }, 2000);
-                    return;
-                } catch (err) {
-                    if (err.name === 'AbortError') {
-                        // User cancelled the save dialog
-                        return;
-                    }
-                    console.log('File System Access API failed, falling back to download:', err);
-                }
-            }
-            
-            // Fallback: traditional download
+            // Standard download
             const blob = new Blob([jsonContent], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -7477,7 +7452,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             }, 2000);
         }
         
-        async function downloadProject() {
+        function downloadProject() {
             if (facilities.length === 0) {
                 alert('Please add at least one facility before saving.');
                 return;
@@ -7550,38 +7525,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             
             const jsonContent = JSON.stringify(cfpData, null, 2);
             
-            // Try File System Access API first (allows folder selection)
-            if ('showSaveFilePicker' in window) {
-                try {
-                    const handle = await window.showSaveFilePicker({
-                        suggestedName: fileName,
-                        types: [{
-                            description: 'Contaminated Facility Project',
-                            accept: { 'application/json': ['.cfp'] }
-                        }]
-                    });
-                    const writable = await handle.createWritable();
-                    await writable.write(jsonContent);
-                    await writable.close();
-                    
-                    // Visual feedback
-                    const btn = document.getElementById('downloadProjectBtn');
-                    const originalText = btn.textContent;
-                    btn.textContent = '✅ Saved!';
-                    setTimeout(() => {
-                        btn.textContent = originalText;
-                    }, 2000);
-                    return;
-                } catch (err) {
-                    if (err.name === 'AbortError') {
-                        // User cancelled the save dialog
-                        return;
-                    }
-                    console.log('File System Access API failed, falling back to download:', err);
-                }
-            }
-            
-            // Fallback: traditional download
+            // Standard download
             const blob = new Blob([jsonContent], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
