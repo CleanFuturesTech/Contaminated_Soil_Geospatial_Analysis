@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.07                                                ║
+    ║  VERSION: 1.08                                                ║
     ║  Last Updated: January 2025                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -15,7 +15,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.07</title>
+    <title>Contaminated Soil Geospatial Analysis v1.08</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
@@ -1273,7 +1273,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle">v1.07</div>
+                <div class="subtitle">v1.08</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -1952,7 +1952,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.07";
+        const APP_VERSION = "1.08";
         console.log(`%c Contaminated Soil Geospatial Analysis v${APP_VERSION} `, 'background: #0a4d3c; color: white; font-size: 14px; padding: 4px 8px; border-radius: 4px;');
         // ============================================================
         
@@ -5085,7 +5085,8 @@ function getFacilityPopupContent(facility) {
     const monthlyAvgCaptured = facility.capturedVolume / periodMonths;
     const annualizedCaptured = monthlyAvgCaptured * 12;
     const cyPerBusinessDay = annualizedCaptured / businessDaysPerYear;
-    const trucksPerHour = cyPerBusinessDay / 18 / 8; // 18 CY per truck, 8 hour day
+    const trucksPerDay = cyPerBusinessDay / 18; // 18 CY per truck
+    const trucksPerHour = trucksPerDay / 8; // 8 hour day
     
     return `
         <div style="min-width: 250px;">
@@ -5103,6 +5104,7 @@ function getFacilityPopupContent(facility) {
                 <em style="font-size: 0.85em; color: #ff6b35;">📈 Annualized (12 months)</em><br>
                 <strong>Annualized Captured:</strong> <span style="color: ${facility.color}; font-weight: 600;">${formatNumber(annualizedCaptured, 2)} CY</span><br>
                 <strong>CY/Business Day:</strong> <span style="color: ${facility.color}; font-weight: 600;">${formatNumber(cyPerBusinessDay, 2)} CY</span><br>
+                <strong>Trucks/Day:</strong> <span style="color: ${facility.color}; font-weight: 600;">${formatNumber(trucksPerDay, 2)}</span><br>
                 <strong>Trucks/Hour:</strong> <span style="color: ${facility.color}; font-weight: 600;">${formatNumber(trucksPerHour, 2)}</span>
             </div>
             <hr style="margin: 8px 0;">
@@ -5551,7 +5553,8 @@ function updateFacilitiesDisplay() {
         const monthlyAvgCaptured = facility.capturedVolume / periodMonths;
         const annualizedCaptured = monthlyAvgCaptured * 12;
         const cyPerBusinessDay = annualizedCaptured / businessDaysPerYear;
-        const trucksPerHour = cyPerBusinessDay / 18 / 8; // 18 CY per truck, 8 hour day
+        const trucksPerDay = cyPerBusinessDay / 18; // 18 CY per truck
+        const trucksPerHour = trucksPerDay / 8; // 8 hour day
         // Note: Use ?? instead of || to allow 0 as a valid value
         const facilityMarketShare = facility.marketShare ?? facilitiesConfig.marketShare;
         
@@ -5611,6 +5614,8 @@ function updateFacilitiesDisplay() {
                     <div style="color: ${facility.color}; font-weight: 600;">${formatNumber(annualizedCaptured, 2)} CY</div>
                     <div style="color: var(--text-secondary);">CY/Business Day:</div>
                     <div style="color: ${facility.color}; font-weight: 600;">${formatNumber(cyPerBusinessDay, 2)} CY</div>
+                    <div style="color: var(--text-secondary);">Trucks/Day:</div>
+                    <div style="color: ${facility.color}; font-weight: 600;">${formatNumber(trucksPerDay, 2)}</div>
                     <div style="color: var(--text-secondary);">Trucks/Hour:</div>
                     <div style="color: ${facility.color}; font-weight: 600;">${formatNumber(trucksPerHour, 2)}</div>
                 </div>
@@ -8021,6 +8026,10 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                                 `).join('')}
                             </tr>
                             <tr style="background: rgba(255, 107, 53, 0.1);">
+                                <td style="padding: 0.75rem; border: 1px solid var(--border); font-weight: 600; color: var(--accent);">🚚 Trucks/Day</td>
+                                ${data.map(d => `<td style="padding: 0.75rem; text-align: right; border: 1px solid var(--border); font-weight: 600;">${formatNumber(d.cyPerBusinessDay / 18, 2)}</td>`).join('')}
+                            </tr>
+                            <tr style="background: rgba(255, 107, 53, 0.1);">
                                 <td style="padding: 0.75rem; border: 1px solid var(--border); font-weight: 600; color: var(--accent);">🚚 Trucks/Hour</td>
                                 ${data.map(d => `<td style="padding: 0.75rem; text-align: right; border: 1px solid var(--border); font-weight: 600;">${formatNumber(d.cyPerBusinessDay / 18 / 8, 2)}</td>`).join('')}
                             </tr>
@@ -8137,6 +8146,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 ['Period Captured Volume (CY)', ...comparisonData.map(d => Math.round(d.periodCapturedVolume))],
                 ['Annualized Captured (CY)', ...comparisonData.map(d => Math.round(d.annualizedCaptured))],
                 ['CY/Business Day', ...comparisonData.map(d => d.cyPerBusinessDay.toFixed(1))],
+                ['Trucks/Day', ...comparisonData.map(d => (d.cyPerBusinessDay / 18).toFixed(2))],
                 ['Trucks/Hour', ...comparisonData.map(d => (d.cyPerBusinessDay / 18 / 8).toFixed(2))],
                 ['Annual Disposal Revenue', ...comparisonData.map(d => Math.round(d.disposalRevenue))],
                 ['Annual Backfill Revenue', ...comparisonData.map(d => Math.round(d.backfillRevenue))],
@@ -8238,6 +8248,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 ['Wells Captured', ...comparisonData.map(d => formatNumber(d.totalWells))],
                 ['Annualized CY', ...comparisonData.map(d => formatNumber(d.annualizedCaptured, 0))],
                 ['CY/Business Day', ...comparisonData.map(d => formatNumber(d.cyPerBusinessDay, 1))],
+                ['Trucks/Day', ...comparisonData.map(d => formatNumber(d.cyPerBusinessDay / 18, 2))],
                 ['Trucks/Hour', ...comparisonData.map(d => formatNumber(d.cyPerBusinessDay / 18 / 8, 2))],
                 ['Disposal Revenue', ...comparisonData.map(d => '$' + formatNumber(d.disposalRevenue, 0))],
                 ['Backfill Revenue', ...comparisonData.map(d => '$' + formatNumber(d.backfillRevenue, 0))],
