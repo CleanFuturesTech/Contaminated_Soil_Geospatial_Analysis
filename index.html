@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.10                                                ║
+    ║  VERSION: 1.11                                                ║
     ║  Last Updated: January 2025                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -15,7 +15,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.10</title>
+    <title>Contaminated Soil Geospatial Analysis v1.11</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
@@ -1273,7 +1273,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle">v1.10</div>
+                <div class="subtitle">v1.11</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -1952,7 +1952,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.10";
+        const APP_VERSION = "1.11";
         console.log(`%c Contaminated Soil Geospatial Analysis v${APP_VERSION} `, 'background: #0a4d3c; color: white; font-size: 14px; padding: 4px 8px; border-radius: 4px;');
         // ============================================================
         
@@ -5491,16 +5491,21 @@ function updateWellColorsByFacility() {
             return;
         }
         
-        // Find which facility this well is assigned to
+        // Find which facility this well is assigned to by checking distance
+        // (more reliable than matching by api/lease which may have empty values)
         let assignedFacility = null;
+        let minDist = Infinity;
+        
         for (const facility of facilities) {
-            if (facility.wells.some(w => w.api === data.api && w.lease === data.lease)) {
+            const dist = calculateDistance(data.lat, data.lng, facility.lat, facility.lng);
+            if (dist < minDist) {
+                minDist = dist;
                 assignedFacility = facility;
-                break;
             }
         }
         
-        if (assignedFacility) {
+        // Only color if within the nearest facility's service radius
+        if (assignedFacility && minDist <= assignedFacility.serviceRadius) {
             // Color by facility
             marker.setStyle({
                 fillColor: assignedFacility.color,
