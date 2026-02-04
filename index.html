@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.11                                                ║
+    ║  VERSION: 1.12                                                ║
     ║  Last Updated: January 2025                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -15,7 +15,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.11</title>
+    <title>Contaminated Soil Geospatial Analysis v1.12</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
@@ -1273,7 +1273,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle">v1.11</div>
+                <div class="subtitle">v1.12</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -1952,7 +1952,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.11";
+        const APP_VERSION = "1.12";
         console.log(`%c Contaminated Soil Geospatial Analysis v${APP_VERSION} `, 'background: #0a4d3c; color: white; font-size: 14px; padding: 4px 8px; border-radius: 4px;');
         // ============================================================
         
@@ -2422,48 +2422,79 @@
                 // Now that datasetCenter is established, re-aggregate with distance filter applied
                 aggregateWellData();
 
-                // Extract unique landfills from aggregated data
-                const landfillMap = new Map();
-                console.log('Step 5: Extracting landfills from wellData...');
-                console.log('wellData length:', wellData.length);
-                console.log('First 3 wells:', wellData.slice(0, 3).map(w => ({ 
-                    site: w.destSite, 
-                    company: w.destCompany,
-                    lat: w.landfillLat,
-                    lng: w.landfillLng
-                })));
-                
-                wellData.forEach(well => {
-                    const key = `${well.destSite}-${well.destCompany}`;
-                    if (!landfillMap.has(key) && well.landfillLat && well.landfillLng) {
-                        landfillMap.set(key, {
-                            site: well.destSite,
-                            company: well.destCompany,
-                            lat: well.landfillLat,
-                            lng: well.landfillLng
+                // Build landfill list - PRIMARY: from Landfill Data sheet, FALLBACK: extract from well data
+                if (landfillSheetData.length > 0) {
+                    // Use Landfill Data sheet as the definitive source
+                    console.log('Step 5: Building landfills from Landfill Data sheet...');
+                    landfills = landfillSheetData.map(lf => ({
+                        site: lf.site,
+                        company: lf.company,
+                        lat: lf.lat,
+                        lng: lf.lng
+                    }));
+                    
+                    // Calculate maximum radius for each landfill based on wells that shipped there
+                    landfills.forEach(landfill => {
+                        let maxDistance = 0;
+                        let hasWellData = false;
+                        wellData.forEach(well => {
+                            if (well.destSite === landfill.site) {
+                                hasWellData = true;
+                                const distance = calculateDistance(
+                                    well.lat, well.lng,
+                                    landfill.lat, landfill.lng
+                                );
+                                maxDistance = Math.max(maxDistance, distance);
+                            }
                         });
-                    }
-                });
-                landfills = Array.from(landfillMap.values());
-                
-                // Calculate maximum radius for each landfill (distance to furthest well that shipped there)
-                landfills.forEach(landfill => {
-                    let maxDistance = 0;
-                    wellData.forEach(well => {
-                        if (well.destSite === landfill.site && well.landfillLat && well.landfillLng) {
-                            const distance = calculateDistance(
-                                well.lat, well.lng,
-                                landfill.lat, landfill.lng
-                            );
-                            maxDistance = Math.max(maxDistance, distance);
+                        // If landfill has matching well data, use that for max radius
+                        // If no wells shipped there (new landfill), use a default of 50 miles
+                        if (hasWellData) {
+                            landfill.maxRadius = Math.max(Math.ceil(maxDistance + 10), 25);
+                        } else {
+                            landfill.maxRadius = 50; // Default for landfills not in dataset
+                            console.log(`Landfill "${landfill.site}" has no matching wells in dataset - using default 50mi radius`);
                         }
                     });
-                    // Store max radius (add 10 miles buffer, minimum 25 miles)
-                    landfill.maxRadius = Math.max(Math.ceil(maxDistance + 10), 25);
-                });
-                
-                console.log('Extracted landfills from wellData:', landfills.length);
-                console.log('Landfill sites:', landfills.map(l => `${l.site} (max: ${l.maxRadius}mi)`));
+                    
+                    console.log('Built landfills from Landfill Data sheet:', landfills.length);
+                } else {
+                    // Fallback: extract from well data (legacy behavior)
+                    console.log('Step 5: Extracting landfills from wellData (no Landfill Data sheet)...');
+                    const landfillMap = new Map();
+                    console.log('wellData length:', wellData.length);
+                    
+                    wellData.forEach(well => {
+                        const key = `${well.destSite}-${well.destCompany}`;
+                        if (!landfillMap.has(key) && well.landfillLat && well.landfillLng) {
+                            landfillMap.set(key, {
+                                site: well.destSite,
+                                company: well.destCompany,
+                                lat: well.landfillLat,
+                                lng: well.landfillLng
+                            });
+                        }
+                    });
+                    landfills = Array.from(landfillMap.values());
+                    
+                    // Calculate maximum radius for each landfill
+                    landfills.forEach(landfill => {
+                        let maxDistance = 0;
+                        wellData.forEach(well => {
+                            if (well.destSite === landfill.site && well.landfillLat && well.landfillLng) {
+                                const distance = calculateDistance(
+                                    well.lat, well.lng,
+                                    landfill.lat, landfill.lng
+                                );
+                                maxDistance = Math.max(maxDistance, distance);
+                            }
+                        });
+                        landfill.maxRadius = Math.max(Math.ceil(maxDistance + 10), 25);
+                    });
+                    
+                    console.log('Extracted landfills from wellData:', landfills.length);
+                }
+                console.log('Landfill sites:', landfills.map(l => `${l.company} - ${l.site} (max: ${l.maxRadius}mi)`));
 
                 renderLandfillList();
                 renderGeneratorList();
@@ -2856,6 +2887,7 @@
         };
         
         let landfillCoordinates = {};
+        let landfillSheetData = []; // Full landfill records from Landfill Data sheet
         
         // Map landfill sites to their counties (for fallback when no GPS and no source county)
         const landfillToCounty = {
@@ -2968,9 +3000,13 @@
         }
         
         // Load landfill coordinates from Landfill Data worksheet
+        // This is now the PRIMARY source for which landfills appear on the map
         function loadLandfillData(workbook) {
             // Start with defaults
             landfillCoordinates = { ...defaultLandfillCoordinates };
+            
+            // Also store full landfill records for building the landfill list
+            landfillSheetData = [];
             
             try {
                 // Check if Landfill Data sheet exists
@@ -2981,6 +3017,7 @@
                     // Parse landfill coordinates
                     landfillData.forEach(row => {
                         const site = row['Destination Site'];
+                        const company = row['Destination Company'] || '';
                         
                         // Handle different column name variations
                         let lat = row['Landfill Lat'] || row['Lat'] || row['Latitude'];
@@ -3000,12 +3037,19 @@
                         
                         if (site && !isNaN(lat) && !isNaN(lng)) {
                             landfillCoordinates[site] = { lat: lat, lng: lng };
+                            landfillSheetData.push({
+                                site: site,
+                                company: company,
+                                lat: lat,
+                                lng: lng
+                            });
                         }
                     });
                     
-                    console.log('Loaded landfill coordinates from Landfill Data sheet:', landfillCoordinates);
+                    console.log('Loaded landfill coordinates from Landfill Data sheet:', Object.keys(landfillCoordinates).length);
+                    console.log('Landfill sheet records:', landfillSheetData.length);
                 } else {
-                    console.warn('Landfill Data sheet not found, using default coordinates');
+                    console.warn('Landfill Data sheet not found, will extract landfills from well data');
                 }
             } catch (error) {
                 console.error('Error loading landfill data:', error);
