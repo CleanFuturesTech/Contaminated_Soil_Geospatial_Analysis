@@ -2,22 +2,47 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.13                                                ║
-    ║  Last Updated: February 2026                                  ║
+    ║  VERSION: 1.14                                                ║
+    ║  Last Updated: August 2026                                    ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
     ║    1. This comment block                                      ║
-    ║    2. <title> tag (line ~7)                                   ║
+    ║    2. <title> tag (line ~18)                                  ║
     ║    3. APP_VERSION constant in <script> section                ║
+    ║                                                               ║
+    ║  (The v-number shown in the sidebar is now driven by          ║
+    ║   APP_VERSION automatically -- no 4th edit needed.)           ║
     ╚═══════════════════════════════════════════════════════════════╝
 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.13</title>
+    <title>Contaminated Soil Geospatial Analysis v1.14</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         GOOGLE MAPS BASEMAP (v1.14)
+         Basemap tiles are served by the Google Maps JavaScript API and
+         rendered inside Leaflet via the GoogleMutant grid layer, which is
+         the ToS-compliant way to use Google tiles in a Leaflet map.
+
+         API key: restrict this key to "Maps JavaScript API" only and set a
+         daily quota cap in Google Cloud Console. The key is visible in this
+         file's source to anyone who opens it.
+         ═══════════════════════════════════════════════════════════════ -->
+    <script>
+        // Readiness promise resolved by the Maps API callback below.
+        window.GMAPS_READY = new Promise(function (resolve, reject) {
+            window.__gmapsOnLoad = resolve;
+            window.__gmapsOnError = reject;
+        });
+    </script>
+    <script async
+            src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCQSBLuBVlCe18HHdVk-z0ur6mdv5v5fLM&loading=async&callback=__gmapsOnLoad"
+            onerror="window.__gmapsOnError(new Error('Google Maps JavaScript API script failed to load'))"></script>
+    <script src="https://unpkg.com/leaflet.gridlayer.googlemutant@0.13.5/dist/Leaflet.GoogleMutant.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -879,6 +904,22 @@
             background: #1a2634;
         }
 
+        /* --- Google basemap (GoogleMutant) support, v1.14 --------------
+           Google's tile <img> elements must not inherit Leaflet's or the
+           page's max-width rules, or tiles render squashed/seamed. */
+        .leaflet-google-mutant img,
+        .leaflet-container .leaflet-google-mutant img {
+            max-width: none !important;
+            max-height: none !important;
+        }
+        /* Keep Google's mandatory logo/attribution legible on the dark UI. */
+        .leaflet-control-attribution {
+            background: rgba(26, 32, 40, 0.82) !important;
+            color: var(--text-secondary) !important;
+        }
+        .leaflet-control-attribution a { color: var(--text-primary) !important; }
+        /* ---------------------------------------------------------------- */
+
         .map-legend {
             background: var(--bg-card);
             padding: 1rem;
@@ -1331,7 +1372,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle">v1.13</div>
+                <div class="subtitle" id="appVersionLabel">v1.14</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -2010,7 +2051,12 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.13";
+        const APP_VERSION = "1.14";
+        // Keep the on-screen version label in sync with APP_VERSION.
+        document.addEventListener('DOMContentLoaded', function () {
+            const el = document.getElementById('appVersionLabel');
+            if (el) el.textContent = 'v' + APP_VERSION;
+        });
         console.log(`%c Contaminated Soil Geospatial Analysis v${APP_VERSION} `, 'background: #0a4d3c; color: white; font-size: 14px; padding: 4px 8px; border-radius: 4px;');
         // ============================================================
         
@@ -2122,26 +2168,73 @@
             return landfillSite;
         }
 
-        // Initialize map
-        function initMap() {
-            map = L.map('map').setView([31.5, -102.5], 7);
-            
-            // Esri World Imagery - satellite imagery base layer
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        // ========================================
+        // BASEMAP (v1.14)
+        // ========================================
+
+        let basemapLayer = null;      // the active basemap layer object
+        let basemapSource = null;      // 'google' | 'esri' -- used by PDF export
+
+        // Google Maps hybrid basemap via the GoogleMutant grid layer.
+        // Change GOOGLE_BASEMAP_TYPE to 'satellite', 'terrain' or 'roadmap' to
+        // switch styles; no other code needs to change.
+        const GOOGLE_BASEMAP_TYPE = 'hybrid';
+
+        async function addGoogleBasemap() {
+            try {
+                if (typeof window.GMAPS_READY === 'undefined') {
+                    throw new Error('Google Maps loader block missing from <head>');
+                }
+                await window.GMAPS_READY;
+
+                if (!L.gridLayer || typeof L.gridLayer.googleMutant !== 'function') {
+                    throw new Error('GoogleMutant plugin failed to load');
+                }
+
+                basemapLayer = L.gridLayer.googleMutant({
+                    type: GOOGLE_BASEMAP_TYPE,
+                    maxZoom: 21
+                });
+                basemapLayer.addTo(map);
+                basemapSource = 'google';
+                console.log('Basemap: Google Maps "' + GOOGLE_BASEMAP_TYPE + '" active');
+            } catch (err) {
+                console.error('Basemap: Google Maps unavailable, falling back to Esri.', err);
+                addEsriBasemap();
+            }
+        }
+
+        // Previous (v1.13) basemap, retained as an automatic fallback so the app
+        // still works if the API key is rejected, quota is exhausted, or the
+        // machine is offline from Google's endpoints.
+        function addEsriBasemap() {
+            const imagery = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
                 attribution: 'Tiles © Esri',
                 maxZoom: 19
             }).addTo(map);
-            
-            // Esri World Transportation - roads and highways
+
             L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
                 maxZoom: 19
             }).addTo(map);
-            
-            // Esri World Boundaries and Places - labels for cities, regions
+
             L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
                 maxZoom: 19,
                 attribution: ' | Labels © Esri'
             }).addTo(map);
+
+            basemapLayer = imagery;
+            basemapSource = 'esri';
+        }
+
+        // Initialize map
+        function initMap() {
+            map = L.map('map').setView([31.5, -102.5], 7);
+            
+            // Basemap: Google Maps hybrid (satellite imagery + roads + labels),
+            // served through the Maps JavaScript API. Attached asynchronously so
+            // the rest of initMap() -- controls, legend, handlers -- never waits
+            // on the network. Falls back to the previous Esri stack on failure.
+            addGoogleBasemap();
 
             // Add University Lands toggle control
             const ulToggle = L.control({ position: 'topright' });
@@ -8814,37 +8907,68 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                     
                     const mapElement = document.getElementById('map');
                     
-                    // Try dom-to-image first (best for SVG/canvas layers)
-                    let imgData;
-                    if (typeof domtoimage !== 'undefined') {
-                        console.log('Using dom-to-image for capture');
-                        imgData = await domtoimage.toPng(mapElement, {
-                            quality: 1,
-                            bgcolor: '#ffffff',
-                            width: mapElement.offsetWidth,
-                            height: mapElement.offsetHeight,
-                            style: {
-                                transform: 'scale(1)',
-                                transformOrigin: 'top left'
-                            }
-                        });
-                    } else {
-                        // Fallback to html2canvas
-                        console.log('Using html2canvas for capture');
-                        const canvas = await html2canvas(mapElement, {
-                            useCORS: true,
-                            allowTaint: true,
-                            backgroundColor: '#ffffff',
-                            width: mapElement.offsetWidth,
-                            height: mapElement.offsetHeight,
-                            scale: 2,
-                            logging: true,
-                            imageTimeout: 0,
-                            removeContainer: false
-                        });
-                        imgData = canvas.toDataURL('image/png');
+                    // Capture cascade (v1.14).
+                    // Previously html2canvas was only tried when domtoimage was
+                    // *undefined* -- so if dom-to-image loaded but THREW, nothing
+                    // else was attempted. dom-to-image inlines images over XHR and
+                    // throws outright on cross-origin tiles that lack CORS headers,
+                    // which is exactly what a Google basemap can produce. Each
+                    // method is now tried in turn until one yields an image.
+                    let imgData = null;
+                    const captureErrors = [];
+
+                    if (!imgData && typeof domtoimage !== 'undefined') {
+                        try {
+                            console.log('Map capture: trying dom-to-image');
+                            imgData = await domtoimage.toPng(mapElement, {
+                                quality: 1,
+                                bgcolor: '#ffffff',
+                                width: mapElement.offsetWidth,
+                                height: mapElement.offsetHeight,
+                                style: {
+                                    transform: 'scale(1)',
+                                    transformOrigin: 'top left'
+                                }
+                            });
+                            console.log('Map capture: dom-to-image succeeded');
+                        } catch (e) {
+                            // dom-to-image rejects with a bare Event on image
+                            // fetch failure, which has no useful .message.
+                            const why = (e && e.type) ? ('image fetch blocked (' + e.type + ')') : (e && e.message) || String(e);
+                            captureErrors.push('dom-to-image: ' + why);
+                            console.warn('Map capture: dom-to-image failed -', why);
+                        }
                     }
-                    
+
+                    if (!imgData && typeof html2canvas !== 'undefined') {
+                        try {
+                            console.log('Map capture: trying html2canvas (useCORS)');
+                            const canvas = await html2canvas(mapElement, {
+                                useCORS: true,
+                                allowTaint: false,
+                                backgroundColor: '#ffffff',
+                                width: mapElement.offsetWidth,
+                                height: mapElement.offsetHeight,
+                                scale: 2,
+                                logging: false,
+                                imageTimeout: 0,
+                                removeContainer: false
+                            });
+                            imgData = canvas.toDataURL('image/png');
+                            console.log('Map capture: html2canvas succeeded');
+                        } catch (e) {
+                            const why = (e && e.message) || String(e);
+                            captureErrors.push('html2canvas: ' + why);
+                            console.warn('Map capture: html2canvas failed -', why);
+                        }
+                    }
+
+                    if (!imgData) {
+                        throw new Error(captureErrors.length
+                            ? captureErrors.join(' / ')
+                            : 'no capture library available');
+                    }
+
                     console.log('Map captured successfully');
                     
                     const imgWidth = pageWidth - (margin * 2);
