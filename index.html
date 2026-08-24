@@ -2,12 +2,12 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.14                                                ║
+    ║  VERSION: 2.1                                                 ║
     ║  Last Updated: August 2026                                    ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
     ║    1. This comment block                                      ║
-    ║    2. <title> tag (line ~18)                                  ║
+    ║    2. <title> tag (line ~21)                                  ║
     ║    3. APP_VERSION constant in <script> section                ║
     ║                                                               ║
     ║  (The v-number shown in the sidebar is now driven by          ║
@@ -18,36 +18,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.14</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <title>Contaminated Soil Geospatial Analysis v2.1</title>
 
     <!-- ═══════════════════════════════════════════════════════════════
-         GOOGLE MAPS BASEMAP (v1.14)
-         Basemap tiles are served by the Google Maps JavaScript API and
-         rendered inside Leaflet via the GoogleMutant grid layer, which is
-         the ToS-compliant way to use Google tiles in a Leaflet map.
+         GOOGLE MAPS JAVASCRIPT API  (v2.0 - native, Leaflet removed)
+         ───────────────────────────────────────────────────────────────
+         CONFIGURE THESE THREE VALUES:
 
-         API key: restrict this key to "Maps JavaScript API" only and set a
-         daily quota cap in Google Cloud Console. The key is visible in this
-         file's source to anyone who opens it.
+           GOOGLE_MAPS_API_KEY  your Maps Platform key
+           GOOGLE_MAP_ID        REQUIRED. Advanced markers will not render
+                                without one. Create at Cloud Console ->
+                                Google Maps Platform -> Map Management.
+                                'DEMO_MAP_ID' works for testing but applies a
+                                reduced-POI style and is not for production.
+           GOOGLE_BASEMAP_TYPE  hybrid | satellite | terrain | roadmap
+
+         The key is embedded in this file and is readable by anyone who opens
+         it. Because the file runs from file://, HTTP-referrer restriction
+         does not apply -- restrict the key to the Maps JavaScript API and
+         Maps Static API, and set a daily quota cap.
          ═══════════════════════════════════════════════════════════════ -->
     <script>
-        // Readiness promise resolved by the Maps API callback below.
-        window.GMAPS_READY = new Promise(function (resolve, reject) {
-            window.__gmapsOnLoad = resolve;
-            window.__gmapsOnError = reject;
+        const GOOGLE_MAPS_API_KEY = 'AIzaSyCQSBLuBVlCe18HHdVk-z0ur6mdv5v5fLM';
+        const GOOGLE_MAP_ID       = 'DEMO_MAP_ID';
+        const GOOGLE_BASEMAP_TYPE = 'hybrid';
+
+        // Official inline bootstrap loader. Libraries are pulled on demand via
+        // google.maps.importLibrary(), so nothing loads until initMap asks.
+        (g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.${c}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({
+            key: GOOGLE_MAPS_API_KEY,
+            v: 'weekly'
         });
     </script>
-    <script async
-            src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCQSBLuBVlCe18HHdVk-z0ur6mdv5v5fLM&loading=async&callback=__gmapsOnLoad"
-            onerror="window.__gmapsOnError(new Error('Google Maps JavaScript API script failed to load'))"></script>
-    <script src="https://unpkg.com/leaflet.gridlayer.googlemutant@0.13.5/dist/Leaflet.GoogleMutant.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         * {
@@ -900,24 +905,188 @@
         }
 
         #map {
-            height: 100vh;
+            height: 100%;
+            min-height: 0;
             background: #1a2634;
         }
 
-        /* --- Google basemap (GoogleMutant) support, v1.14 --------------
-           Google's tile <img> elements must not inherit Leaflet's or the
-           page's max-width rules, or tiles render squashed/seamed. */
-        .leaflet-google-mutant img,
-        .leaflet-container .leaflet-google-mutant img {
-            max-width: none !important;
-            max-height: none !important;
+        /* --- Split map area + Street View pane (v2.1) ------------------- */
+        .map-area {
+            position: relative;
+            display: grid;
+            grid-template-columns: 1fr 0px;
+            height: 100vh;
+            overflow: hidden;
+            transition: grid-template-columns 0.25s ease;
         }
-        /* Keep Google's mandatory logo/attribution legible on the dark UI. */
-        .leaflet-control-attribution {
-            background: rgba(26, 32, 40, 0.82) !important;
-            color: var(--text-secondary) !important;
+        .map-area.sv-open { grid-template-columns: 1fr minmax(320px, 42%); }
+
+        .sv-pane {
+            position: relative;
+            display: none;
+            flex-direction: column;
+            background: var(--bg-card);
+            border-left: 2px solid var(--border);
         }
-        .leaflet-control-attribution a { color: var(--text-primary) !important; }
+        .map-area.sv-open .sv-pane { display: flex; }
+
+        .sv-header {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.6rem 0.85rem;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            flex: 0 0 auto;
+        }
+        .sv-title {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-primary);
+        }
+        .sv-status { font-size: 0.72rem; color: var(--text-secondary); margin-left: auto; }
+        .sv-close {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            width: 24px; height: 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+        }
+        .sv-close:hover { color: var(--text-primary); border-color: var(--accent); }
+        #streetViewCanvas { flex: 1 1 auto; min-height: 0; }
+        .sv-empty {
+            display: none;
+            padding: 1.25rem;
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+            line-height: 1.6;
+        }
+        .sv-empty strong { display: block; color: var(--text-primary); margin-bottom: 0.4rem; }
+        .sv-pane.no-imagery #streetViewCanvas { display: none; }
+        .sv-pane.no-imagery .sv-empty { display: block; }
+
+        /* --- Map controls: basemap switcher, 3D toggle (v2.1) ----------- */
+        .gmap-toolbar {
+            display: flex;
+            /* With the Street View pane open the map area narrows, so the
+               toolbar must wrap rather than overflow off the map. */
+            flex-wrap: wrap;
+            max-width: calc(100% - 20px);
+            gap: 4px;
+            background: rgba(26, 32, 40, 0.92);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 4px;
+            margin: 10px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(4px);
+        }
+        .gmap-toolbar button {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 6px 11px;
+            border-radius: 5px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s, color 0.15s;
+        }
+        .gmap-toolbar button:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+        .gmap-toolbar button.active { background: var(--primary); color: #fff; }
+        .gmap-toolbar .sep { width: 1px; background: var(--border); margin: 3px 2px; flex: 0 0 auto; }
+
+        /* --- Photorealistic 3D overlay (v2.1) --------------------------- */
+        .map3d-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 12000;
+            background: #05080b;
+            flex-direction: column;
+        }
+        .map3d-overlay.open { display: flex; }
+        .map3d-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.7rem 1rem;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            flex: 0 0 auto;
+        }
+        .map3d-title {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-primary);
+        }
+        .map3d-note { font-size: 0.75rem; color: var(--text-secondary); margin-right: auto; }
+        .map3d-btn {
+            background: var(--primary);
+            border: none;
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 600;
+            padding: 7px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .map3d-btn:hover { background: var(--primary-light); }
+        .map3d-close { background: #4a5568; }
+        .map3d-close:hover { background: #5a6578; }
+        #map3dHost { flex: 1 1 auto; min-height: 0; position: relative; }
+        #map3dHost gmp-map-3d { width: 100%; height: 100%; display: block; }
+
+        /* --- Native Google Maps support (v2.0) -------------------------- */
+
+        /* Custom controls pushed into map.controls need their own spacing. */
+        .gmap-control { margin: 10px; }
+
+        /* InfoWindow interior: Google supplies a white bubble, so popup text
+           must be dark regardless of the app's dark theme. */
+        .gm-style .gm-style-iw-c { padding: 12px !important; }
+        .gmap-popup {
+            font-family: 'Inter', sans-serif;
+            color: #222;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            max-width: 260px;
+        }
+        .gmap-popup strong { color: #111; }
+
+        /* Marker content wrappers. Advanced markers position their content by
+           centre, so no icon-anchor maths is needed. */
+        .gmap-marker { position: relative; transform: translate(0, 0); }
+        .gmap-marker > div { box-sizing: border-box; }
+
+        /* Hover tooltip + live radius label, both plain positioned divs. */
+        .gmap-tooltip, .gmap-radius-label {
+            position: absolute;
+            background: rgba(30, 30, 30, 0.95);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'Inter', sans-serif;
+            pointer-events: none;
+            z-index: 10000;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            max-width: 250px;
+            white-space: nowrap;
+        }
+        .gmap-radius-label { white-space: nowrap; }
         /* ---------------------------------------------------------------- */
 
         .map-legend {
@@ -1372,7 +1541,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle" id="appVersionLabel">v1.14</div>
+                <div class="subtitle" id="appVersionLabel">v2.1</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -2044,14 +2213,40 @@
             </div>
         </div>
 
-        <div id="map"></div>
+        <div class="map-area" id="mapArea">
+            <div id="map"></div>
+            <div id="streetViewPane" class="sv-pane">
+                <div class="sv-header">
+                    <span class="sv-title">Street View</span>
+                    <span class="sv-status" id="svStatus"></span>
+                    <button class="sv-close" id="svCloseBtn" title="Close Street View">&times;</button>
+                </div>
+                <div id="streetViewCanvas"></div>
+                <div class="sv-empty" id="svEmpty">
+                    <strong>No imagery here</strong>
+                    <p>No Street View panorama within 1&nbsp;km. Lease roads and well pads
+                       are often not covered. Turn on the coverage layer to see where imagery exists.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Photorealistic 3D overlay (Map3DElement lives here) -->
+        <div id="map3dOverlay" class="map3d-overlay">
+            <div class="map3d-bar">
+                <span class="map3d-title">Photorealistic 3D</span>
+                <span class="map3d-note" id="map3dNote"></span>
+                <button class="map3d-btn" id="map3dOrbitBtn">Orbit</button>
+                <button class="map3d-btn map3d-close" id="map3dCloseBtn">Close 3D</button>
+            </div>
+            <div id="map3dHost"></div>
+        </div>
     </div>
 
     <script>
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.14";
+        const APP_VERSION = "2.1";
         // Keep the on-screen version label in sync with APP_VERSION.
         document.addEventListener('DOMContentLoaded', function () {
             const el = document.getElementById('appVersionLabel');
@@ -2097,7 +2292,8 @@
         let filteredWellData = []; // Data after date filtering
         let landfills = [];
         let map, radiusCircles = [], wellMarkers = [], landfillMarkers = {};
-        let universityLandsLayer = null; // GeoJSON layer for University Lands overlay
+        // universityLandsLayer removed in v2.0 -- replaced by the
+        // google.maps.Data layer declared as universityLandsData below.
         let universityLandsLoaded = false; // Whether UL data has been fetched
         let centerpointMarker = null; // Marker for dataset geographic center
         let volumeCenterMarker = null; // Marker for volume-weighted center (strategic placement)
@@ -2169,78 +2365,714 @@
         }
 
         // ========================================
-        // BASEMAP (v1.14)
+        // GOOGLE MAPS LAYER  (v2.0)
+        // ----------------------------------------
+        // Leaflet has been removed. Everything below talks to google.maps
+        // directly. A handful of small helpers stand in for the Leaflet
+        // conveniences the app relied on (popups, tooltips, layer removal)
+        // so that call sites elsewhere stay readable.
         // ========================================
 
-        let basemapLayer = null;      // the active basemap layer object
-        let basemapSource = null;      // 'google' | 'esri' -- used by PDF export
+        let AdvancedMarkerElement = null;   // from the 'marker' library
+        let PinElement = null;
+        let spherical = null;               // from the 'geometry' library
+        let infoWindow = null;              // one shared InfoWindow
+        let universityLandsData = null;     // google.maps.Data layer
+        let mapReadyResolve;
+        const MAP_READY = new Promise(r => { mapReadyResolve = r; });
 
-        // Google Maps hybrid basemap via the GoogleMutant grid layer.
-        // Change GOOGLE_BASEMAP_TYPE to 'satellite', 'terrain' or 'roadmap' to
-        // switch styles; no other code needs to change.
-        const GOOGLE_BASEMAP_TYPE = 'hybrid';
+        // Resolve a CSS custom property to a real colour. Google Maps needs
+        // literal colours -- it cannot consume "var(--primary)" the way an SVG
+        // attribute could under Leaflet.
+        const _cssVarCache = {};
+        function cssVar(name, fallback) {
+            if (_cssVarCache[name]) return _cssVarCache[name];
+            let v = '';
+            try { v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); } catch (e) {}
+            return (_cssVarCache[name] = v || fallback || '#0a4d3c');
+        }
 
-        async function addGoogleBasemap() {
+        // ---- overlay lifecycle -------------------------------------------
+        // Advanced markers detach via .map = null; every other overlay uses
+        // setMap(null). One helper covers both so call sites need not care.
+        function removeOverlay(o) {
+            if (!o) return;
             try {
-                if (typeof window.GMAPS_READY === 'undefined') {
-                    throw new Error('Google Maps loader block missing from <head>');
+                if (o.__isAdvancedMarker) {
+                    o.map = null;
+                    if (o.__tooltipEl && o.__tooltipEl.parentNode) o.__tooltipEl.parentNode.removeChild(o.__tooltipEl);
+                } else if (typeof o.setMap === 'function') {
+                    o.setMap(null);
+                } else if (o.__isLabel) {
+                    if (o.el && o.el.parentNode) o.el.parentNode.removeChild(o.el);
                 }
-                await window.GMAPS_READY;
+            } catch (e) { console.warn('removeOverlay:', e); }
+        }
 
-                if (!L.gridLayer || typeof L.gridLayer.googleMutant !== 'function') {
-                    throw new Error('GoogleMutant plugin failed to load');
+        // ---- popups (one shared InfoWindow, Leaflet-style binding) --------
+        function bindPopup(overlay, content) {
+            overlay.__popupContent = content;
+            const open = () => {
+                if (!infoWindow) return;
+                infoWindow.setContent('<div class="gmap-popup">' + (overlay.__popupContent || '') + '</div>');
+                infoWindow.open({ map: map, anchor: overlay });
+            };
+            if (overlay.__isAdvancedMarker) overlay.addListener('click', open);
+            else if (typeof overlay.addListener === 'function') overlay.addListener('click', open);
+            overlay.__openPopup = open;
+        }
+        function setPopupContent(overlay, content) {
+            overlay.__popupContent = content;
+            if (infoWindow && infoWindow.getAnchor && infoWindow.getAnchor() === overlay) {
+                infoWindow.setContent('<div class="gmap-popup">' + content + '</div>');
+            }
+        }
+        function closePopup() { if (infoWindow) infoWindow.close(); }
+
+        // ---- hover tooltips ----------------------------------------------
+        // Google Maps has no tooltip primitive. Advanced markers expose their
+        // content element, so a positioned div driven by pointer events is
+        // both simpler and cheaper than a custom OverlayView.
+        function bindTooltip(marker, html) {
+            const el = document.createElement('div');
+            el.className = 'gmap-tooltip';
+            el.innerHTML = html;
+            document.body.appendChild(el);
+            marker.__tooltipEl = el;
+
+            const target = marker.content || (marker.element || null);
+            if (!target) return;
+            target.addEventListener('mouseenter', ev => {
+                el.style.display = 'block';
+                el.style.left = (ev.clientX + 14) + 'px';
+                el.style.top = (ev.clientY - 12) + 'px';
+            });
+            target.addEventListener('mousemove', ev => {
+                el.style.left = (ev.clientX + 14) + 'px';
+                el.style.top = (ev.clientY - 12) + 'px';
+            });
+            target.addEventListener('mouseleave', () => { el.style.display = 'none'; });
+        }
+
+        // ---- advanced-marker factory -------------------------------------
+        // Replaces L.divIcon + L.marker. Advanced markers anchor their content
+        // by its centre-bottom, so the wrapper shifts by half its own height to
+        // reproduce Leaflet's centred iconAnchor behaviour.
+        function makeMarker(lat, lng, html, opts) {
+            opts = opts || {};
+            const wrap = document.createElement('div');
+            wrap.className = 'gmap-marker';
+            wrap.innerHTML = html;
+            const marker = new AdvancedMarkerElement({
+                map: opts.noMap ? null : map,
+                position: { lat: Number(lat), lng: Number(lng) },
+                content: wrap,
+                gmpDraggable: !!opts.draggable,
+                // Required. gmpClickable defaults to FALSE on advanced markers,
+                // so without this no marker would ever fire a click and none of
+                // the popups below would open.
+                gmpClickable: opts.clickable === false ? false : true,
+                zIndex: opts.zIndex || 1,
+                title: opts.title || ''
+            });
+            marker.__isAdvancedMarker = true;
+            // Advanced markers expose .position (a LatLng or literal) rather
+            // than Leaflet's getLatLng(); __pos() normalises it for callers.
+            marker.__pos = function () { return toLatLngLiteral(this.position); };
+            // Centre the content on the coordinate (Leaflet iconAnchor parity).
+            wrap.style.transform = 'translateY(50%)';
+            return marker;
+        }
+
+        // ---- well dots ---------------------------------------------------
+        // Wells can number in the thousands. Advanced markers are real DOM
+        // nodes and do not scale to that, so wells use the symbol-icon marker,
+        // which the API renders far more cheaply. Everything else on the map is
+        // a handful of objects and uses advanced markers.
+        function makeWellMarker(lat, lng, style) {
+            const m = new google.maps.Marker({
+                position: { lat: Number(lat), lng: Number(lng) },
+                icon: wellIcon(style),
+                optimized: true,
+                clickable: true
+            });
+            m.__isWell = true;
+            return m;
+        }
+        function wellIcon(st) {
+            return {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: st.radius != null ? st.radius : 4,
+                fillColor: st.fillColor || '#4a9eff',
+                fillOpacity: st.fillOpacity != null ? st.fillOpacity : 0.6,
+                strokeColor: st.color || '#ffffff',
+                strokeWeight: st.weight != null ? st.weight : 1,
+                strokeOpacity: st.opacity != null ? st.opacity : 0.8
+            };
+        }
+        // Stands in for Leaflet's circleMarker.setStyle().
+        function setWellStyle(marker, st) {
+            if (!marker || !marker.setIcon) return;
+            const prev = marker.getIcon() || {};
+            marker.setIcon(wellIcon({
+                radius:      st.radius      != null ? st.radius      : prev.scale,
+                fillColor:   st.fillColor   != null ? st.fillColor   : prev.fillColor,
+                fillOpacity: st.fillOpacity != null ? st.fillOpacity : prev.fillOpacity,
+                color:       st.color       != null ? st.color       : prev.strokeColor,
+                weight:      st.weight      != null ? st.weight      : prev.strokeWeight,
+                opacity:     st.opacity     != null ? st.opacity     : prev.strokeOpacity
+            }));
+        }
+
+        // ---- floating label (replaces the L.tooltip used while dragging) ---
+        function makeRadiusLabel(html) {
+            const el = document.createElement('div');
+            el.className = 'gmap-radius-label';
+            el.innerHTML = html;
+            el.style.display = 'block';
+            document.body.appendChild(el);
+            return {
+                __isLabel: true,
+                el: el,
+                setContent(h) { el.innerHTML = h; },
+                moveToEvent(domEv) {
+                    if (!domEv) return;
+                    el.style.left = (domEv.clientX + 14) + 'px';
+                    el.style.top  = (domEv.clientY - 34) + 'px';
+                }
+            };
+        }
+
+        // ---- distance ----------------------------------------------------
+        // metres between two {lat,lng}-ish values, via the geometry library.
+        function metresBetween(a, b) {
+            return spherical.computeDistanceBetween(
+                new google.maps.LatLng(a.lat, a.lng),
+                new google.maps.LatLng(b.lat, b.lng)
+            );
+        }
+        // Normalise a google.maps.LatLng (methods) or plain object to {lat,lng}.
+        function toLatLngLiteral(v) {
+            if (!v) return null;
+            if (typeof v.lat === 'function') return { lat: v.lat(), lng: v.lng() };
+            return { lat: Number(v.lat), lng: Number(v.lng) };
+        }
+
+        // ========================================
+        // MAP INITIALISATION
+        // ========================================
+        async function initMap() {
+            try {
+                const [{ Map, InfoWindow }, markerLib, geometryLib] = await Promise.all([
+                    google.maps.importLibrary('maps'),
+                    google.maps.importLibrary('marker'),
+                    google.maps.importLibrary('geometry')
+                ]);
+                AdvancedMarkerElement = markerLib.AdvancedMarkerElement;
+                PinElement = markerLib.PinElement;
+                spherical = google.maps.geometry.spherical;
+
+                if (!GOOGLE_MAP_ID) {
+                    console.warn('GOOGLE_MAP_ID is empty -- advanced markers will not render.');
                 }
 
-                basemapLayer = L.gridLayer.googleMutant({
-                    type: GOOGLE_BASEMAP_TYPE,
-                    maxZoom: 21
+                map = new Map(document.getElementById('map'), {
+                    center: { lat: 31.5, lng: -102.5 },
+                    zoom: 7,
+                    mapId: GOOGLE_MAP_ID,
+                    mapTypeId: savedBasemap() || GOOGLE_BASEMAP_TYPE,
+                    // VECTOR is required for tilt and heading. A div-based map
+                    // defaults to RASTER, on which setTilt/setHeading silently
+                    // do nothing. This option overrides the Map ID's own setting.
+                    renderingType: google.maps.RenderingType.VECTOR,
+                    tilt: 0,
+                    tiltInteractionEnabled: true,
+                    headingInteractionEnabled: true,
+                    rotateControl: true,
+                    mapTypeControl: false,        // replaced by our own switcher
+                    streetViewControl: true,      // pegman, in addition to the pane
+                    fullscreenControl: false,
+                    clickableIcons: false         // POIs must not steal marker clicks
                 });
-                basemapLayer.addTo(map);
-                basemapSource = 'google';
-                console.log('Basemap: Google Maps "' + GOOGLE_BASEMAP_TYPE + '" active');
+
+                infoWindow = new InfoWindow({ maxWidth: 320 });
+
+                addMapToolbarControl();
+                addUniversityLandsControl();
+                addLegendControl();
+                initStreetView();
+
+                map.addListener('click', function (e) {
+                    if (placementMode && e.latLng) {
+                        placeMyFacility(e.latLng.lat(), e.latLng.lng());
+                    }
+                });
+
+                console.log('Map: native Google Maps "' + GOOGLE_BASEMAP_TYPE + '" ready (mapId ' + GOOGLE_MAP_ID + ')');
+                mapReadyResolve(map);
             } catch (err) {
-                console.error('Basemap: Google Maps unavailable, falling back to Esri.', err);
-                addEsriBasemap();
+                console.error('Map failed to initialise:', err);
+                const el = document.getElementById('map');
+                if (el) {
+                    el.innerHTML = '<div style="padding:2rem;font-family:Inter,sans-serif;color:#e8eaed;">'
+                        + '<h2 style="margin-bottom:.5rem;">Map could not load</h2>'
+                        + '<p style="color:#9aa0a6;max-width:46ch;line-height:1.6;">'
+                        + 'The Google Maps JavaScript API did not initialise. Check the API key, '
+                        + 'that Maps JavaScript API is enabled for the project, that billing is active, '
+                        + 'and that GOOGLE_MAP_ID is set.</p>'
+                        + '<pre style="margin-top:1rem;color:#ff6b6b;white-space:pre-wrap;">' + (err && err.message ? err.message : err) + '</pre>'
+                        + '</div>';
+                }
+                mapReadyResolve(null);
             }
         }
 
-        // Previous (v1.13) basemap, retained as an automatic fallback so the app
-        // still works if the API key is rejected, quota is exhausted, or the
-        // machine is offline from Google's endpoints.
-        function addEsriBasemap() {
-            const imagery = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles © Esri',
-                maxZoom: 19
-            }).addTo(map);
-
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
-                maxZoom: 19
-            }).addTo(map);
-
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-                maxZoom: 19,
-                attribution: ' | Labels © Esri'
-            }).addTo(map);
-
-            basemapLayer = imagery;
-            basemapSource = 'esri';
+        // Street View / 3D action links, injected into marker popups.
+        function viewLinks(lat, lng, label) {
+            const l = String(label || '').replace(/'/g, "\\'");
+            return `
+                <div style="margin-top:0.6rem;padding-top:0.55rem;border-top:1px solid #ddd;display:flex;gap:0.4rem;">
+                    <button onclick="streetViewFor(${lat},${lng},'${l}')"
+                            style="flex:1;background:#0a4d3c;color:#fff;border:none;padding:0.4rem 0.5rem;
+                                   border-radius:5px;cursor:pointer;font-weight:600;font-size:0.78em;">
+                        Street View
+                    </button>
+                    <button onclick="open3DFor(${lat},${lng},'${l}')"
+                            style="flex:1;background:#1f6f8b;color:#fff;border:none;padding:0.4rem 0.5rem;
+                                   border-radius:5px;cursor:pointer;font-weight:600;font-size:0.78em;">
+                        3D View
+                    </button>
+                </div>`;
         }
 
-        // Initialize map
-        function initMap() {
-            map = L.map('map').setView([31.5, -102.5], 7);
-            
-            // Basemap: Google Maps hybrid (satellite imagery + roads + labels),
-            // served through the Maps JavaScript API. Attached asynchronously so
-            // the rest of initMap() -- controls, legend, handlers -- never waits
-            // on the network. Falls back to the previous Esri stack on failure.
-            addGoogleBasemap();
+        // ========================================
+        // BASEMAP SWITCHER + 3D TILT  (v2.1)
+        // ========================================
 
-            // Add University Lands toggle control
-            const ulToggle = L.control({ position: 'topright' });
-            ulToggle.onAdd = function() {
-                const div = L.DomUtil.create('div', 'ul-toggle-control');
-                div.innerHTML = `
+        const BASEMAP_TYPES = [
+            { id: 'hybrid',    label: 'Hybrid'    },
+            { id: 'satellite', label: 'Satellite' },
+            { id: 'roadmap',   label: 'Map'       },
+            { id: 'terrain',   label: 'Terrain'   }
+        ];
+        const BASEMAP_STORAGE_KEY = 'csga.basemap';
+        const TILT_3D_DEGREES = 47.5;
+
+        // Remember the chosen basemap between sessions. Storage can throw in
+        // private windows, so every access is guarded.
+        function savedBasemap() {
+            try {
+                const v = localStorage.getItem(BASEMAP_STORAGE_KEY);
+                return BASEMAP_TYPES.some(b => b.id === v) ? v : null;
+            } catch (e) { return null; }
+        }
+        function rememberBasemap(id) {
+            try { localStorage.setItem(BASEMAP_STORAGE_KEY, id); } catch (e) {}
+        }
+
+        function addMapToolbarControl() {
+            const bar = document.createElement('div');
+            bar.className = 'gmap-toolbar';
+
+            const active = map.getMapTypeId();
+            const buttons = {};
+
+            BASEMAP_TYPES.forEach(t => {
+                const b = document.createElement('button');
+                b.textContent = t.label;
+                b.title = t.label + ' basemap';
+                if (t.id === active) b.classList.add('active');
+                b.addEventListener('click', () => {
+                    map.setMapTypeId(t.id);
+                    rememberBasemap(t.id);
+                    Object.values(buttons).forEach(x => x.classList.remove('active'));
+                    b.classList.add('active');
+                });
+                buttons[t.id] = b;
+                bar.appendChild(b);
+            });
+
+            bar.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
+
+            // 2D / 3D tilt toggle. Tilt is a vector-map feature; the map is
+            // created with renderingType VECTOR so this has an effect.
+            const tiltBtn = document.createElement('button');
+            tiltBtn.textContent = '3D Tilt';
+            tiltBtn.title = 'Tilt the camera. Buildings and terrain relief show best zoomed in.';
+            tiltBtn.addEventListener('click', () => {
+                const on = (map.getTilt() || 0) > 1;
+                if (on) {
+                    map.setTilt(0);
+                    map.setHeading(0);
+                    tiltBtn.classList.remove('active');
+                } else {
+                    map.setTilt(TILT_3D_DEGREES);
+                    tiltBtn.classList.add('active');
+                    if ((map.getZoom() || 0) < 14) {
+                        flashMapHint('Zoom in past ~14 for 3D terrain and buildings.');
+                    }
+                }
+            });
+            bar.appendChild(tiltBtn);
+
+            // Reset the compass back to north-up.
+            const northBtn = document.createElement('button');
+            northBtn.textContent = 'North';
+            northBtn.title = 'Reset rotation to north';
+            northBtn.addEventListener('click', () => { map.setHeading(0); });
+            bar.appendChild(northBtn);
+
+            bar.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
+
+            // Street View coverage layer -- worth having, because rural lease
+            // roads frequently have no imagery at all.
+            const covBtn = document.createElement('button');
+            covBtn.textContent = 'SV Coverage';
+            covBtn.title = 'Show where Street View imagery exists';
+            covBtn.addEventListener('click', async () => {
+                try {
+                    if (!streetViewCoverage) {
+                        await google.maps.importLibrary('streetView');
+                        streetViewCoverage = new google.maps.StreetViewCoverageLayer();
+                    }
+                    const on = !!streetViewCoverage.getMap();
+                    streetViewCoverage.setMap(on ? null : map);
+                    covBtn.classList.toggle('active', !on);
+                } catch (e) {
+                    console.warn('Coverage layer unavailable:', e);
+                    flashMapHint('Street View coverage layer unavailable.');
+                }
+            });
+            bar.appendChild(covBtn);
+
+            // Photorealistic 3D
+            const btn3d = document.createElement('button');
+            btn3d.textContent = '3D View';
+            btn3d.title = 'Open the photorealistic 3D view at the current centre';
+            btn3d.addEventListener('click', () => {
+                const c = toLatLngLiteral(map.getCenter());
+                open3DView(c.lat, c.lng, 'current view');
+            });
+            bar.appendChild(btn3d);
+
+            ['click', 'dblclick', 'mousedown', 'wheel', 'touchstart'].forEach(t =>
+                bar.addEventListener(t, e => e.stopPropagation()));
+
+            map.controls[google.maps.ControlPosition.TOP_LEFT].push(bar);
+        }
+
+        // Brief non-blocking hint inside the map area.
+        let _hintTimer = null;
+        function flashMapHint(text) {
+            let el = document.getElementById('mapHint');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'mapHint';
+                el.style.cssText = 'position:absolute;left:50%;top:16px;transform:translateX(-50%);'
+                    + 'background:rgba(26,32,40,0.95);color:#e8eaed;border:1px solid #2d3748;'
+                    + 'padding:8px 14px;border-radius:8px;font:600 0.78rem Inter,sans-serif;'
+                    + 'z-index:9000;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.45);';
+                const host = document.getElementById('mapArea') || document.body;
+                host.appendChild(el);
+            }
+            el.textContent = text;
+            el.style.opacity = '1';
+            clearTimeout(_hintTimer);
+            _hintTimer = setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .4s'; }, 3200);
+        }
+
+        // ========================================
+        // STREET VIEW  (v2.1)
+        // ========================================
+
+        let streetViewPanorama = null;
+        let streetViewService = null;
+        let streetViewCoverage = null;
+        const SV_SEARCH_RADIUS_M = 1000;   // lease roads are often well off-pad
+
+        async function initStreetView() {
+            try {
+                const svLib = await google.maps.importLibrary('streetView');
+                streetViewService = new svLib.StreetViewService();
+                streetViewPanorama = new svLib.StreetViewPanorama(
+                    document.getElementById('streetViewCanvas'), {
+                        visible: false,
+                        addressControl: true,
+                        linksControl: true,
+                        panControl: true,
+                        zoomControl: true,
+                        fullscreenControl: false,
+                        motionTracking: false,
+                        motionTrackingControl: false
+                    });
+                // Let the pegman drive our pane instead of covering the map.
+                map.setStreetView(streetViewPanorama);
+
+                const closeBtn = document.getElementById('svCloseBtn');
+                if (closeBtn) closeBtn.addEventListener('click', closeStreetView);
+                console.log('Street View: ready');
+            } catch (err) {
+                console.warn('Street View unavailable:', err);
+            }
+        }
+
+        // Open the pane on the nearest panorama to a point, or explain why not.
+        function openStreetViewAt(lat, lng, label) {
+            const pane = document.getElementById('streetViewPane');
+            const area = document.getElementById('mapArea');
+            const statusEl = document.getElementById('svStatus');
+            if (!pane || !area) return;
+
+            area.classList.add('sv-open');
+            pane.classList.remove('no-imagery');
+            if (statusEl) statusEl.textContent = 'Searching…';
+
+            if (!streetViewService || !streetViewPanorama) {
+                pane.classList.add('no-imagery');
+                if (statusEl) statusEl.textContent = 'unavailable';
+                return;
+            }
+
+            streetViewService.getPanorama({
+                location: { lat: Number(lat), lng: Number(lng) },
+                radius: SV_SEARCH_RADIUS_M,
+                preference: google.maps.StreetViewPreference && google.maps.StreetViewPreference.NEAREST
+            }, function (data, status) {
+                const ok = status === google.maps.StreetViewStatus.OK || status === 'OK';
+                if (ok && data && data.location) {
+                    pane.classList.remove('no-imagery');
+                    streetViewPanorama.setPano(data.location.pano);
+                    // Face the point of interest from wherever the camera stands.
+                    const p = toLatLngLiteral(data.location.latLng);
+                    streetViewPanorama.setPov({ heading: bearingTo(p.lat, p.lng, lat, lng), pitch: 0 });
+                    streetViewPanorama.setVisible(true);
+                    const away = Math.round(metresBetween(p, { lat: Number(lat), lng: Number(lng) }));
+                    if (statusEl) {
+                        statusEl.textContent = (label ? label + ' — ' : '')
+                            + (away <= 25 ? 'on location' : away + ' m away');
+                    }
+                    // Keep the map centred on what is being viewed.
+                    map.panTo({ lat: Number(lat), lng: Number(lng) });
+                } else {
+                    pane.classList.add('no-imagery');
+                    streetViewPanorama.setVisible(false);
+                    if (statusEl) statusEl.textContent = 'no imagery';
+                    console.log('Street View: no panorama within ' + SV_SEARCH_RADIUS_M + 'm of '
+                                + lat + ',' + lng + ' (status ' + status + ')');
+                }
+            });
+        }
+
+        function closeStreetView() {
+            const area = document.getElementById('mapArea');
+            if (area) area.classList.remove('sv-open');
+            if (streetViewPanorama) streetViewPanorama.setVisible(false);
+        }
+
+        // Initial compass bearing from one point to another, in degrees.
+        function bearingTo(lat1, lng1, lat2, lng2) {
+            const r = Math.PI / 180;
+            const p1 = lat1 * r, p2 = lat2 * r, dl = (lng2 - lng1) * r;
+            const y = Math.sin(dl) * Math.cos(p2);
+            const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+            return (Math.atan2(y, x) / r + 360) % 360;
+        }
+
+        // Called from marker popups (inline onclick), so it must be global.
+        window.streetViewFor = function (lat, lng, label) {
+            openStreetViewAt(Number(lat), Number(lng), label || '');
+        };
+        window.open3DFor = function (lat, lng, label) {
+            open3DView(Number(lat), Number(lng), label || '');
+        };
+
+        // ========================================
+        // PHOTOREALISTIC 3D VIEW  (v2.1)
+        // ----------------------------------------
+        // A separate Map3DElement instance. It shares no overlays with the 2D
+        // map, so facilities, landfills and wells are re-created here as 3D
+        // elements each time the view opens. Coverage is dense over cities and
+        // thin over rural West Texas -- expect bare terrain over many pads.
+        // ========================================
+
+        let map3d = null;
+        let maps3dLib = null;
+        let map3dOrbiting = false;
+        const MAX_3D_WELLS = 300;   // 3D markers are far heavier than 2D dots
+
+        async function open3DView(lat, lng, label) {
+            const overlay = document.getElementById('map3dOverlay');
+            const host = document.getElementById('map3dHost');
+            const note = document.getElementById('map3dNote');
+            if (!overlay || !host) return;
+
+            overlay.classList.add('open');
+            if (note) note.textContent = 'Loading 3D tiles…';
+
+            try {
+                if (!maps3dLib) maps3dLib = await google.maps.importLibrary('maps3d');
+                const { Map3DElement, Marker3DElement, Polygon3DElement, MapMode } = maps3dLib;
+
+                if (!map3d) {
+                    map3d = new Map3DElement({
+                        center: { lat: Number(lat), lng: Number(lng), altitude: 0 },
+                        range: 6000,
+                        tilt: 60,
+                        heading: 0,
+                        mode: (MapMode && MapMode.SATELLITE) || 'SATELLITE'
+                    });
+                    host.appendChild(map3d);
+
+                    const closeBtn = document.getElementById('map3dCloseBtn');
+                    if (closeBtn) closeBtn.addEventListener('click', close3DView);
+                    const orbitBtn = document.getElementById('map3dOrbitBtn');
+                    if (orbitBtn) orbitBtn.addEventListener('click', toggle3DOrbit);
+                }
+
+                // Rebuild the scene for the current data.
+                populate3DScene(Marker3DElement, Polygon3DElement);
+
+                // Fly in rather than snapping, which reads much better.
+                if (typeof map3d.flyCameraTo === 'function') {
+                    map3d.flyCameraTo({
+                        endCamera: {
+                            center: { lat: Number(lat), lng: Number(lng), altitude: 0 },
+                            tilt: 60,
+                            range: 3500
+                        },
+                        durationMillis: 2000
+                    });
+                } else {
+                    map3d.center = { lat: Number(lat), lng: Number(lng), altitude: 0 };
+                    map3d.range = 3500;
+                }
+
+                if (note) {
+                    note.textContent = (label ? label + ' — ' : '')
+                        + 'photorealistic coverage is sparse in rural areas; terrain may render without detail.';
+                }
+            } catch (err) {
+                console.error('3D view failed:', err);
+                if (note) note.textContent = 'Could not load 3D: ' + (err && err.message ? err.message : err);
+            }
+        }
+
+        // Re-create the analysis overlays as 3D elements.
+        function populate3DScene(Marker3DElement, Polygon3DElement) {
+            if (!map3d) return;
+
+            // Clear whatever the previous open left behind.
+            Array.from(map3d.children).forEach(c => c.remove());
+
+            // Facility service-radius rings, as ground-clamped polygons.
+            if (Polygon3DElement) {
+                facilities.forEach(f => {
+                    const ring = circleRing(f.lat, f.lng, f.serviceRadius, 72);
+                    const poly = new Polygon3DElement({
+                        outerCoordinates: ring,
+                        altitudeMode: 'CLAMP_TO_GROUND',
+                        strokeColor: f.color,
+                        strokeWidth: 3,
+                        fillColor: hexToRgba(f.color, 0.16)
+                    });
+                    map3d.append(poly);
+                });
+            }
+
+            // Facilities, raised and extruded so they read against terrain.
+            facilities.forEach(f => {
+                const m = new Marker3DElement({
+                    position: { lat: f.lat, lng: f.lng, altitude: 220 },
+                    altitudeMode: 'RELATIVE_TO_GROUND',
+                    extruded: true,
+                    label: 'Facility ' + f.id
+                });
+                map3d.append(m);
+            });
+
+            // Landfills
+            landfills.forEach(lf => {
+                const m = new Marker3DElement({
+                    position: { lat: lf.lat, lng: lf.lng, altitude: 140 },
+                    altitudeMode: 'RELATIVE_TO_GROUND',
+                    extruded: true,
+                    label: formatLandfillName(lf.site)
+                });
+                map3d.append(m);
+            });
+
+            // Wells, capped -- 3D markers are much heavier than 2D symbol dots.
+            const wells = (filteredWellData || []).filter(w =>
+                w.lat && w.lng && Math.abs(w.lat) > 0.0001 && Math.abs(w.lng) > 0.0001);
+            const step = wells.length > MAX_3D_WELLS ? Math.ceil(wells.length / MAX_3D_WELLS) : 1;
+            let shown = 0;
+            for (let i = 0; i < wells.length; i += step) {
+                const w = wells[i];
+                map3d.append(new Marker3DElement({
+                    position: { lat: Number(w.lat), lng: Number(w.lng) },
+                    altitudeMode: 'CLAMP_TO_GROUND'
+                }));
+                shown++;
+            }
+            if (step > 1) {
+                console.log(`3D view: showing ${shown} of ${wells.length} wells (every ${step}th, capped at ${MAX_3D_WELLS}).`);
+                flashMapHint(`3D view is showing ${shown} of ${wells.length} wells for performance.`);
+            }
+        }
+
+        // Approximate a geodesic circle as a polygon ring.
+        function circleRing(lat, lng, radiusMiles, points) {
+            const R = 3959; // miles
+            const out = [];
+            const latR = lat * Math.PI / 180;
+            for (let i = 0; i <= points; i++) {
+                const brg = (i / points) * 2 * Math.PI;
+                const d = radiusMiles / R;
+                const la = Math.asin(Math.sin(latR) * Math.cos(d) + Math.cos(latR) * Math.sin(d) * Math.cos(brg));
+                const lo = lng * Math.PI / 180 + Math.atan2(
+                    Math.sin(brg) * Math.sin(d) * Math.cos(latR),
+                    Math.cos(d) - Math.sin(latR) * Math.sin(la));
+                out.push({ lat: la * 180 / Math.PI, lng: lo * 180 / Math.PI, altitude: 0 });
+            }
+            return out;
+        }
+
+        function toggle3DOrbit() {
+            if (!map3d) return;
+            const btn = document.getElementById('map3dOrbitBtn');
+            if (map3dOrbiting) {
+                if (typeof map3d.stopCameraAnimation === 'function') map3d.stopCameraAnimation();
+                map3dOrbiting = false;
+                if (btn) btn.textContent = 'Orbit';
+                return;
+            }
+            if (typeof map3d.flyCameraAround === 'function') {
+                map3d.flyCameraAround({
+                    camera: { center: map3d.center, tilt: map3d.tilt || 60, range: map3d.range || 3500 },
+                    durationMillis: 30000,
+                    rounds: 1
+                });
+                map3dOrbiting = true;
+                if (btn) btn.textContent = 'Stop';
+            }
+        }
+
+        function close3DView() {
+            const overlay = document.getElementById('map3dOverlay');
+            if (overlay) overlay.classList.remove('open');
+            if (map3dOrbiting && map3d && typeof map3d.stopCameraAnimation === 'function') {
+                map3d.stopCameraAnimation();
+                map3dOrbiting = false;
+                const btn = document.getElementById('map3dOrbitBtn');
+                if (btn) btn.textContent = 'Orbit';
+            }
+        }
+
+        // ---- custom controls (replace L.control) --------------------------
+        function addUniversityLandsControl() {
+            const div = document.createElement('div');
+            div.className = 'ul-toggle-control gmap-control';
+            div.innerHTML = `
                     <label class="ul-toggle-label">
                         <input type="checkbox" id="ulToggleCheckbox">
                         <span class="ul-toggle-swatch"></span>
@@ -2248,28 +3080,24 @@
                         <span id="ulLoadingSpinner" style="display:none;" class="ul-loading-spinner"></span>
                     </label>
                 `;
-                // Prevent map click-through
-                L.DomEvent.disableClickPropagation(div);
-                L.DomEvent.disableScrollPropagation(div);
-                
-                div.querySelector('#ulToggleCheckbox').addEventListener('change', function() {
-                    if (this.checked) {
-                        loadUniversityLands();
-                    } else {
-                        if (universityLandsLayer) {
-                            map.removeLayer(universityLandsLayer);
-                        }
-                    }
-                });
-                return div;
-            };
-            ulToggle.addTo(map);
+            // Controls sit inside the map div, so stop events reaching the map.
+            ['click', 'dblclick', 'mousedown', 'wheel', 'touchstart'].forEach(t =>
+                div.addEventListener(t, e => e.stopPropagation()));
 
-            // Add legend
-            const legend = L.control({ position: 'bottomright' });
-            legend.onAdd = function() {
-                const div = L.DomUtil.create('div', 'map-legend');
-                div.innerHTML = `
+            div.querySelector('#ulToggleCheckbox').addEventListener('change', function () {
+                if (this.checked) {
+                    loadUniversityLands();
+                } else if (universityLandsData) {
+                    universityLandsData.setMap(null);
+                }
+            });
+            map.controls[google.maps.ControlPosition.TOP_RIGHT].push(div);
+        }
+
+        function addLegendControl() {
+            const div = document.createElement('div');
+            div.className = 'map-legend gmap-control';
+            div.innerHTML = `
                     <div class="legend-title">Map Legend</div>
                     <div class="legend-item">
                         <div class="legend-marker marker-well"></div>
@@ -2296,22 +3124,15 @@
                         <span>University Lands</span>
                     </div>
                 `;
-                return div;
-            };
-            legend.addTo(map);
-            
-            // Add click handler for facility placement
-            map.on('click', function(e) {
-                if (placementMode) {
-                    placeMyFacility(e.latlng.lat, e.latlng.lng);
-                }
-            });
+            ['click', 'dblclick', 'mousedown', 'wheel', 'touchstart'].forEach(t =>
+                div.addEventListener(t, e => e.stopPropagation()));
+            map.controls[google.maps.ControlPosition.BOTTOM_RIGHT].push(div);
         }
 
         // Load University Lands GeoJSON from ArcGIS REST service
         async function loadUniversityLands() {
-            if (universityLandsLoaded && universityLandsLayer) {
-                universityLandsLayer.addTo(map);
+            if (universityLandsLoaded && universityLandsData) {
+                universityLandsData.setMap(map);
                 return;
             }
             
@@ -2342,43 +3163,42 @@
                 }
                 
                 console.log(`University Lands: loaded ${allFeatures.length} block features`);
-                
-                const geojson = {
+
+                // google.maps.Data replaces L.geoJSON.
+                universityLandsData = new google.maps.Data({ map: map });
+                universityLandsData.addGeoJson({
                     type: 'FeatureCollection',
                     features: allFeatures
-                };
-                
-                universityLandsLayer = L.geoJSON(geojson, {
-                    style: function(feature) {
-                        return {
-                            fillColor: '#bf5700',
-                            fillOpacity: 0.45,
-                            color: '#bf5700',
-                            weight: 2,
-                            opacity: 0.9
-                        };
-                    },
-                    onEachFeature: function(feature, layer) {
-                        const p = feature.properties || {};
-                        const blockNum = p.blocknum || 'N/A';
-                        const county = p.county || 'N/A';
-                        const region = p.region || 'N/A';
-                        layer.bindPopup(`
-                            <div style="font-family: 'Inter', sans-serif; min-width: 160px;">
-                                <div style="font-weight: 700; font-size: 1rem; color: #bf5700; margin-bottom: 0.4rem;">
-                                    University Lands
-                                </div>
-                                <div style="font-size: 0.85rem; color: #333; line-height: 1.6;">
-                                    <strong>Block:</strong> ${blockNum}<br>
-                                    <strong>County:</strong> ${county}<br>
-                                    <strong>Region:</strong> ${region}
-                                </div>
-                            </div>
-                        `);
-                    }
                 });
-                
-                universityLandsLayer.addTo(map);
+                universityLandsData.setStyle({
+                    fillColor: '#bf5700',
+                    fillOpacity: 0.45,
+                    strokeColor: '#bf5700',
+                    strokeWeight: 2,
+                    strokeOpacity: 0.9,
+                    clickable: true
+                });
+                universityLandsData.addListener('click', function (ev) {
+                    const f = ev.feature;
+                    const blockNum = f.getProperty('blocknum') || 'N/A';
+                    const county   = f.getProperty('county')   || 'N/A';
+                    const region   = f.getProperty('region')   || 'N/A';
+                    infoWindow.setContent(`
+                        <div class="gmap-popup" style="min-width: 160px;">
+                            <div style="font-weight: 700; font-size: 1rem; color: #bf5700; margin-bottom: 0.4rem;">
+                                University Lands
+                            </div>
+                            <div style="font-size: 0.85rem; color: #333; line-height: 1.6;">
+                                <strong>Block:</strong> ${blockNum}<br>
+                                <strong>County:</strong> ${county}<br>
+                                <strong>Region:</strong> ${region}
+                            </div>
+                        </div>
+                    `);
+                    infoWindow.setPosition(ev.latLng);
+                    infoWindow.open({ map: map });
+                });
+
                 universityLandsLoaded = true;
                 
             } catch (error) {
@@ -2477,6 +3297,14 @@
 
         // Load and parse Excel file with daily transaction data
         async function loadData(workbook, sheetName) {
+            // v2.0: the Maps JS API loads its libraries on demand, so the map
+            // may not exist yet when a file is picked. Everything downstream of
+            // here draws markers, so wait for the map before touching it.
+            await MAP_READY;
+            if (!map) {
+                alert('The map failed to load, so the data cannot be plotted. Check the browser console for the Google Maps error.');
+                return;
+            }
             console.log('===== LOADDATA FUNCTION CALLED =====');
             console.log('Workbook:', workbook ? 'exists' : 'NULL');
             console.log('SheetName:', sheetName);
@@ -2818,11 +3646,12 @@
                     const validCoords = wellData
                         .filter(w => w.lat && w.lng && !isNaN(w.lat) && !isNaN(w.lng) && 
                                    Math.abs(w.lat) >= 0.0001 && Math.abs(w.lng) >= 0.0001)
-                        .map(w => [w.lat, w.lng]);
+                        .map(w => ({ lat: Number(w.lat), lng: Number(w.lng) }));
                     
                     if (validCoords.length > 0) {
-                        const bounds = L.latLngBounds(validCoords);
-                        map.fitBounds(bounds, { padding: [50, 50] });
+                        const bounds = new google.maps.LatLngBounds();
+                        validCoords.forEach(c => bounds.extend(c));
+                        map.fitBounds(bounds, 50);
                         console.log(`Map fitted to ${validCoords.length} valid coordinates`);
                     } else {
                         console.error('No valid coordinates found in wellData');
@@ -3539,25 +4368,16 @@
         function addCenterpointMarker(lat, lng) {
             // Remove existing centerpoint marker if any
             if (centerpointMarker) {
-                map.removeLayer(centerpointMarker);
+                removeOverlay(centerpointMarker);
             }
-            
-            // Create custom icon for centerpoint (bright green)
-            const centerpointIcon = L.divIcon({
-                className: 'centerpoint-marker',
-                html: '<div style="background: #00ff00; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>',
-                iconSize: [16, 16],
-                iconAnchor: [8, 8]
-            });
-            
-            // Add marker to map
-            centerpointMarker = L.marker([lat, lng], { 
-                icon: centerpointIcon,
-                zIndexOffset: 1000 // Ensure it's on top
-            }).addTo(map);
-            
+
+            // Bright green dot marking the geographic centre of the dataset.
+            centerpointMarker = makeMarker(lat, lng,
+                '<div style="background: #00ff00; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>',
+                { zIndex: 1000 });
+
             // Add popup
-            centerpointMarker.bindPopup(`
+            bindPopup(centerpointMarker, `
                 <strong>Dataset Centerpoint</strong><br>
                 Lat: ${lat.toFixed(6)}<br>
                 Lng: ${lng.toFixed(6)}<br>
@@ -3617,25 +4437,16 @@
         function addVolumeCenterMarker(lat, lng, totalVolume, wellCount) {
             // Remove existing volume center marker if any
             if (volumeCenterMarker) {
-                map.removeLayer(volumeCenterMarker);
+                removeOverlay(volumeCenterMarker);
             }
-            
-            // Create custom icon for volume center (purple)
-            const volumeCenterIcon = L.divIcon({
-                className: 'volume-center-marker',
-                html: '<div style="background: #9b59b6; width: 18px; height: 18px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>',
-                iconSize: [18, 18],
-                iconAnchor: [9, 9]
-            });
-            
-            // Add marker to map
-            volumeCenterMarker = L.marker([lat, lng], { 
-                icon: volumeCenterIcon,
-                zIndexOffset: 1001 // Ensure it's on top of regular centerpoint
-            }).addTo(map);
-            
+
+            // Purple dot: volume-weighted centre, sits above the plain centre.
+            volumeCenterMarker = makeMarker(lat, lng,
+                '<div style="background: #9b59b6; width: 18px; height: 18px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>',
+                { zIndex: 1001 });
+
             // Add popup
-            volumeCenterMarker.bindPopup(`
+            bindPopup(volumeCenterMarker, `
                 <strong>Volume-Weighted Center</strong><br>
                 <em>Optimal Facility Location</em><br><br>
                 Lat: ${lat.toFixed(6)}<br>
@@ -3674,7 +4485,7 @@
             placementMode = true;
             document.getElementById('facilityPlacementMode').style.display = 'block';
             document.getElementById('placeFacilityBtn').style.display = 'none';
-            map.getContainer().style.cursor = 'crosshair';
+            map.getDiv().style.cursor = 'crosshair';
         }
         
         // Disable facility placement mode
@@ -3682,7 +4493,7 @@
             placementMode = false;
             document.getElementById('facilityPlacementMode').style.display = 'none';
             document.getElementById('placeFacilityBtn').style.display = 'block';
-            map.getContainer().style.cursor = '';
+            map.getDiv().style.cursor = '';
         }
         
         // Place user's facility on map
@@ -3693,45 +4504,41 @@
             
             // Remove existing marker if any
             if (myFacilityMarker) {
-                map.removeLayer(myFacilityMarker);
+                removeOverlay(myFacilityMarker);
             }
             if (myFacilityCircle) {
-                map.removeLayer(myFacilityCircle);
+                removeOverlay(myFacilityCircle);
             }
-            
-            // Create custom icon for facility (cyan/teal with dollar sign)
-            const facilityIcon = L.divIcon({
-                className: 'my-facility-marker',
-                html: '<div style="background: #00d4ff; width: 24px; height: 24px; border-radius: 50%; border: 4px solid white; box-shadow: 0 0 15px rgba(0,212,255,0.8); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #003d4d;">$</div>',
-                iconSize: [24, 24],
-                iconAnchor: [12, 12]
-            });
-            
-            // Add marker
-            myFacilityMarker = L.marker([lat, lng], { 
-                icon: facilityIcon,
-                zIndexOffset: 2000 // Ensure it's on top
-            }).addTo(map);
-            
+
+            // Cyan dollar-sign pin for the proposed facility.
+            myFacilityMarker = makeMarker(lat, lng,
+                '<div style="background: #00d4ff; width: 24px; height: 24px; border-radius: 50%; border: 4px solid white; box-shadow: 0 0 15px rgba(0,212,255,0.8); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #003d4d;">$</div>',
+                { zIndex: 2000 });
+
             // Add popup
-            myFacilityMarker.bindPopup(`
+            bindPopup(myFacilityMarker, `
                 <strong style="color: #00d4ff;">MY FACILITY</strong><br>
                 <em>Proposed Location</em><br><br>
                 Lat: ${lat.toFixed(6)}<br>
                 Lng: ${lng.toFixed(6)}
+                ${viewLinks(lat, lng, 'My Facility')}
             `);
             
-            // Draw service radius circle
-            myFacilityCircle = L.circle([lat, lng], {
+            // Draw service radius circle.
+            // google.maps.Circle has no dashArray equivalent -- a dashed ring
+            // needs a Polyline with icons -- so this renders solid at reduced
+            // opacity to stay visually distinct without the extra machinery.
+            myFacilityCircle = new google.maps.Circle({
+                map: map,
+                center: { lat: Number(lat), lng: Number(lng) },
                 radius: myFacilityRadius * 1609.34, // Convert miles to meters
-                color: '#00d4ff',
+                strokeColor: '#00d4ff',
+                strokeOpacity: 0.7,
+                strokeWeight: 3,
                 fillColor: '#00d4ff',
                 fillOpacity: 0.1,
-                weight: 3,
-                opacity: 0.7,
-                dashArray: '10, 10', // Dashed line
-                interactive: false  // Allow hover events to pass through
-            }).addTo(map);
+                clickable: false   // Allow hover events to pass through
+            });
             
             // Update display
             document.getElementById('myFacilityCoords').textContent = 
@@ -3750,11 +4557,11 @@
         // Remove user's facility from map
         function removeMyFacility() {
             if (myFacilityMarker) {
-                map.removeLayer(myFacilityMarker);
+                removeOverlay(myFacilityMarker);
                 myFacilityMarker = null;
             }
             if (myFacilityCircle) {
-                map.removeLayer(myFacilityCircle);
+                removeOverlay(myFacilityCircle);
                 myFacilityCircle = null;
             }
             
@@ -4049,7 +4856,7 @@
         // Clear all map markers
         function clearMapMarkers() {
             wellMarkers.forEach(({ marker, tooltip }) => {
-                map.removeLayer(marker);
+                removeOverlay(marker);
                 if (tooltip && tooltip.parentNode) {
                     tooltip.parentNode.removeChild(tooltip);
                 }
@@ -4074,20 +4881,20 @@
             
             // Clear map
             if (map) {
-                radiusCircles.forEach(circle => map.removeLayer(circle));
-                wellMarkers.forEach(marker => map.removeLayer(marker));
-                Object.values(landfillMarkers).forEach(marker => map.removeLayer(marker));
+                radiusCircles.forEach(circle => removeOverlay(circle));
+                wellMarkers.forEach(marker => removeOverlay(marker));
+                Object.values(landfillMarkers).forEach(marker => removeOverlay(marker));
                 if (centerpointMarker) {
-                    map.removeLayer(centerpointMarker);
+                    removeOverlay(centerpointMarker);
                 }
                 if (volumeCenterMarker) {
-                    map.removeLayer(volumeCenterMarker);
+                    removeOverlay(volumeCenterMarker);
                 }
                 if (myFacilityMarker) {
-                    map.removeLayer(myFacilityMarker);
+                    removeOverlay(myFacilityMarker);
                 }
                 if (myFacilityCircle) {
-                    map.removeLayer(myFacilityCircle);
+                    removeOverlay(myFacilityCircle);
                 }
             }
             radiusCircles = [];
@@ -4346,11 +5153,11 @@
             toggleLandfill(index);
             
             // Close all popups
-            map.closePopup();
+            closePopup();
             
             // Recreate landfill markers with updated button states
             // This is needed because the popup HTML is static
-            Object.values(landfillMarkers).forEach(marker => map.removeLayer(marker));
+            Object.values(landfillMarkers).forEach(marker => removeOverlay(marker));
             landfillMarkers = {};
             addLandfillMarkers();
             
@@ -4389,17 +5196,17 @@
         function updateCircleRadiusOnly(index, radius) {
             // Find and update the circle for this landfill
             radiusCircles.forEach(item => {
-                if (item.landfillIndex === index && item.setRadius) {
-                    // This is the circle (not the handle)
+                if (item.landfillIndex !== index) return;
+                if (item.__kind === 'circle') {
                     item.setRadius(radius * 1609.34);
-                } else if (item.landfillIndex === index && item.setLatLng) {
-                    // This is the handle - reposition it
+                } else if (item.__kind === 'handle') {
+                    // Reposition the drag handle onto the new circle edge.
                     const landfill = landfills[index];
                     const angleInRadians = 45 * (Math.PI / 180);
                     const radiusInMeters = radius * 1609.34;
                     const handleLat = landfill.lat + (radiusInMeters / 111320) * Math.cos(angleInRadians);
                     const handleLng = landfill.lng + (radiusInMeters / (111320 * Math.cos(landfill.lat * Math.PI / 180))) * Math.sin(angleInRadians);
-                    item.setLatLng([handleLat, handleLng]);
+                    item.position = { lat: handleLat, lng: handleLng };
                 }
             });
         }
@@ -4414,7 +5221,7 @@
                 wellMarkers.forEach(({ marker, data }) => {
                     const wellKey = getWellKey(data);
                     const isFiltered = !filteredKeys.has(wellKey);
-                    marker.setStyle({
+                    setWellStyle(marker, {
                         fillColor: isFiltered ? '#808080' : '#4a9eff',
                         radius: 4,
                         opacity: isFiltered ? 0.3 : 0.8,
@@ -4452,7 +5259,7 @@
                     );
                     
                     if (distance <= landfillRadius && data.destSite === landfill.site) {
-                        marker.setStyle({
+                        setWellStyle(marker, {
                             fillColor: '#ffd700',
                             radius: 6,
                             opacity: 0.9,
@@ -4780,7 +5587,7 @@
                 const wellKey = getWellKey(well);
                 const isFiltered = !filteredKeys.has(wellKey);
                 
-                const marker = L.circleMarker([well.lat, well.lng], {
+                const marker = makeWellMarker(well.lat, well.lng, {
                     radius: 4,
                     fillColor: isFiltered ? '#808080' : '#4a9eff',  // Grey if filtered, blue if active
                     color: '#fff',
@@ -4793,7 +5600,7 @@
                     `<strong>Date Range:</strong> ${well.firstDate.toLocaleDateString()} to ${well.lastDate.toLocaleDateString()}<br>` : '';
                 
                 // Popup (on click)
-                marker.bindPopup(`
+                bindPopup(marker, `
                     <strong>API #:</strong> ${well.api}<br>
                     <strong>Lease:</strong> ${well.lease}<br>
                     <strong>Operator:</strong> ${well.generator}<br>
@@ -4802,25 +5609,12 @@
                     <strong>Number of Loads:</strong> ${well.loadCount}<br>
                     <strong>Destination:</strong> ${well.destSite}<br>
                     ${isFiltered ? '<br><span style="color: #ff6b6b;"><strong>⚠ Filtered Out (Distance)</strong></span>' : ''}
+                    ${viewLinks(well.lat, well.lng, 'API ' + well.api)}
                 `);
                 
                 // Create tooltip div for hover
                 const tooltipDiv = document.createElement('div');
-                tooltipDiv.className = 'well-tooltip';
-                tooltipDiv.style.cssText = `
-                    position: absolute;
-                    background: rgba(30, 30, 30, 0.95);
-                    color: white;
-                    padding: 8px 12px;
-                    border-radius: 6px;
-                    font-size: 12px;
-                    pointer-events: none;
-                    z-index: 10000;
-                    display: none;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-                    border: 1px solid rgba(255,255,255,0.2);
-                    max-width: 250px;
-                `;
+                tooltipDiv.className = 'gmap-tooltip well-tooltip';
                 tooltipDiv.innerHTML = `
                     <div style="font-weight: 600; margin-bottom: 4px; color: ${isFiltered ? '#ff6b6b' : '#4a9eff'};">
                         ${isFiltered ? '⚠ FILTERED OUT' : '✓ ACTIVE'}
@@ -4832,25 +5626,25 @@
                 `;
                 document.body.appendChild(tooltipDiv);
                 
-                // Hover events
-                marker.on('mouseover', function(e) {
-                    const point = map.latLngToContainerPoint(e.latlng);
-                    tooltipDiv.style.left = (point.x + 15) + 'px';
-                    tooltipDiv.style.top = (point.y - 10) + 'px';
+                // Hover events. e.domEvent is the underlying pointer event, so
+                // the tooltip follows the cursor directly rather than being
+                // projected from a lat/lng as it was under Leaflet.
+                const placeTip = function (e) {
+                    const de = e && e.domEvent;
+                    if (!de) return;
+                    tooltipDiv.style.left = (de.clientX + 15) + 'px';
+                    tooltipDiv.style.top = (de.clientY - 10) + 'px';
+                };
+                marker.addListener('mouseover', function (e) {
+                    placeTip(e);
                     tooltipDiv.style.display = 'block';
                 });
-                
-                marker.on('mouseout', function() {
+                marker.addListener('mouseout', function () {
                     tooltipDiv.style.display = 'none';
                 });
-                
-                marker.on('mousemove', function(e) {
-                    const point = map.latLngToContainerPoint(e.latlng);
-                    tooltipDiv.style.left = (point.x + 15) + 'px';
-                    tooltipDiv.style.top = (point.y - 10) + 'px';
-                });
-                
-                marker.addTo(map);
+                marker.addListener('mousemove', placeTip);
+
+                marker.setMap(map);
                 wellMarkers.push({ marker, data: well, tooltip: tooltipDiv });
                 markersAdded++;
             });
@@ -4861,21 +5655,16 @@
         // Add landfill markers to map
         function addLandfillMarkers() {
             landfills.forEach((landfill, index) => {
-                const marker = L.marker([landfill.lat, landfill.lng], {
-                    icon: L.divIcon({
-                        className: 'custom-marker',
-                        html: `<div style="background: var(--accent); width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>`,
-                        iconSize: [16, 16],
-                        iconAnchor: [8, 8]
-                    })
-                });
+                const marker = makeMarker(landfill.lat, landfill.lng,
+                    `<div style="background: ${cssVar('--accent', '#ff6b35')}; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>`,
+                    { zIndex: 900 });
                 
                 // Build popup content with select/deselect button
                 const isSelected = selectedLandfills.has(index);
                 const buttonText = isSelected ? 'Deselect Landfill' : 'Select Landfill';
                 const buttonStyle = isSelected ? 'background: var(--danger); color: white;' : 'background: var(--primary); color: white;';
                 
-                marker.bindPopup(`
+                bindPopup(marker, `
                     <div style="min-width: 200px;">
                         <strong style="font-size: 1.1em;">${formatLandfillName(landfill.site)}</strong><br>
                         <span style="color: var(--text-secondary);">${landfill.company}</span>
@@ -4895,21 +5684,17 @@
                         <div style="margin-top: 0.5rem; font-size: 0.85em; color: var(--text-secondary);">
                             ${landfill.lat.toFixed(4)}, ${landfill.lng.toFixed(4)}
                         </div>
+                        ${viewLinks(landfill.lat, landfill.lng, formatLandfillName(landfill.site))}
                     </div>
                 `);
                 
                 // Add hover tooltip
-                marker.bindTooltip(`
+                bindTooltip(marker, `
                     <strong>${formatLandfillName(landfill.site)}</strong><br>
                     ${landfill.company}<br>
                     <span style="font-size: 0.9em; opacity: 0.8;">${isSelected ? '✓ Selected' : 'Click to select'}</span>
-                `, {
-                    direction: 'top',
-                    offset: [0, -10],
-                    opacity: 0.95
-                });
-                
-                marker.addTo(map);
+                `);
+
                 landfillMarkers[index] = marker;
             });
         }
@@ -4917,7 +5702,7 @@
         // Update analysis based on selections
         function updateAnalysis() {
             // Clear existing circles
-            radiusCircles.forEach(circle => map.removeLayer(circle));
+            radiusCircles.forEach(circle => removeOverlay(circle));
             radiusCircles = [];
 
             // Reset well markers based on whether facilities are active
@@ -4931,7 +5716,7 @@
                     const wellKey = getWellKey(data);
                     const isFiltered = !filteredKeys.has(wellKey);
                     
-                    marker.setStyle({
+                    setWellStyle(marker, {
                         fillColor: isFiltered ? '#808080' : '#4a9eff',  // Grey if filtered, blue if active
                         radius: 4,
                         opacity: isFiltered ? 0.3 : 0.8,
@@ -4969,19 +5754,28 @@
                 const landfill = landfills[index];
                 const landfillRadius = settings.radius; // Use per-landfill radius
                 
-                // Draw radius circle with this landfill's specific radius
-                const circle = L.circle([landfill.lat, landfill.lng], {
+                // Draw radius circle with this landfill's specific radius.
+                // Google Maps needs a literal colour, so the CSS custom
+                // property is resolved rather than passed through.
+                const primaryColor = cssVar('--primary', '#0a4d3c');
+                const circle = new google.maps.Circle({
+                    map: map,
+                    center: { lat: landfill.lat, lng: landfill.lng },
                     radius: landfillRadius * 1609.34, // Convert miles to meters
-                    color: 'var(--primary)',
-                    fillColor: 'var(--primary)',
+                    strokeColor: primaryColor,
+                    strokeOpacity: 0.6,
+                    strokeWeight: 2,
+                    fillColor: primaryColor,
                     fillOpacity: 0.1,
-                    weight: 2,
-                    opacity: 0.6,
-                    interactive: true  // Make interactive for dragging
-                }).addTo(map);
-                
-                // Store circle with landfill index
+                    clickable: false
+                });
+
+                // Store circle with landfill index. __kind lets
+                // updateCircleRadiusOnly tell circles from handles -- the old
+                // code duck-typed on setRadius/setLatLng, which no longer
+                // discriminates now that both are google.maps objects.
                 circle.landfillIndex = index;
+                circle.__kind = 'circle';
                 radiusCircles.push(circle);
                 
                 // Add draggable radius handle (marker at edge of circle)
@@ -4990,28 +5784,23 @@
                 const handleLat = landfill.lat + (radiusInMeters / 111320) * Math.cos(angleInRadians);
                 const handleLng = landfill.lng + (radiusInMeters / (111320 * Math.cos(landfill.lat * Math.PI / 180))) * Math.sin(angleInRadians);
                 
-                const handle = L.marker([handleLat, handleLng], {
-                    icon: L.divIcon({
-                        className: 'radius-handle',
-                        html: '<div style="width: 12px; height: 12px; background: var(--primary); border: 2px solid white; border-radius: 50%; cursor: move; box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>',
-                        iconSize: [12, 12],
-                        iconAnchor: [6, 6]
-                    }),
-                    draggable: true
-                }).addTo(map);
-                
+                const handle = makeMarker(handleLat, handleLng,
+                    '<div style="width: 12px; height: 12px; background: ' + primaryColor + '; border: 2px solid white; border-radius: 50%; cursor: move; box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>',
+                    { draggable: true, zIndex: 950 });
+
                 // Store handle reference
                 handle.landfillIndex = index;
                 handle.parentCircle = circle;
+                handle.__kind = 'handle';
                 radiusCircles.push(handle);
                 
                 // Handle drag event
-                handle.on('drag', function(e) {
-                    const handlePos = e.target.getLatLng();
-                    const centerPos = L.latLng(landfill.lat, landfill.lng);
-                    
-                    // Calculate new radius in miles
-                    const newRadiusMeters = centerPos.distanceTo(handlePos);
+                handle.addListener('drag', function(e) {
+                    const handlePos = toLatLngLiteral(e.latLng);
+                    if (!handlePos) return;
+
+                    // Calculate new radius in miles (spherical, via geometry lib)
+                    const newRadiusMeters = metresBetween({ lat: landfill.lat, lng: landfill.lng }, handlePos);
                     const newRadiusMiles = Math.round(newRadiusMeters / 1609.34);
                     
                     // Constrain to min 1 mile and max radius for this landfill
@@ -5035,7 +5824,7 @@
                 });
                 
                 // Update statistics and combined results after drag ends
-                handle.on('dragend', function(e) {
+                handle.addListener('dragend', function(e) {
                     // Use the debounced yellow dots and stats update for consistency
                     updateYellowDotsAndStats();
                 });
@@ -5085,7 +5874,7 @@
                             coordSourceVolumes[source] += data.quantity;
                         }
                         
-                        marker.setStyle({
+                        setWellStyle(marker, {
                             fillColor: '#ffd700',
                             radius: 6
                         });
@@ -5224,10 +6013,8 @@ function addFacility(lat, lng) {
 
 // Create draggable marker for facility
 function createFacilityMarker(facility) {
-    // Create custom icon with number
-    const icon = L.divIcon({
-        className: 'facility-marker',
-        html: `<div style="
+    // Numbered, draggable pin for the facility.
+    const facilityHtml = `<div style="
             background: ${facility.color};
             width: 36px;
             height: 36px;
@@ -5241,33 +6028,30 @@ function createFacilityMarker(facility) {
             font-weight: bold;
             color: white;
             cursor: move;
-        ">${facility.id}</div>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18]
-    });
-    
+        ">${facility.id}</div>`;
+
     // Create draggable marker
-    facility.marker = L.marker([facility.lat, facility.lng], {
-        icon: icon,
+    facility.marker = makeMarker(facility.lat, facility.lng, facilityHtml, {
         draggable: true,
-        zIndexOffset: 1000
-    }).addTo(map);
-    
+        zIndex: 1000
+    });
+
     // Bind popup
-    facility.marker.bindPopup(getFacilityPopupContent(facility));
+    bindPopup(facility.marker, getFacilityPopupContent(facility));
     
     // Drag events
-    facility.marker.on('dragstart', function() {
+    facility.marker.addListener('dragstart', function() {
         if (facility.circle) {
-            map.removeLayer(facility.circle);
+            removeOverlay(facility.circle);
         }
         if (facility.resizeHandle) {
-            map.removeLayer(facility.resizeHandle);
+            removeOverlay(facility.resizeHandle);
         }
     });
     
-    facility.marker.on('dragend', function(e) {
-        const newPos = e.target.getLatLng();
+    facility.marker.addListener('dragend', function(e) {
+        const newPos = toLatLngLiteral(e.latLng);
+        if (!newPos) return;
         facility.lat = newPos.lat;
         facility.lng = newPos.lng;
         
@@ -5281,7 +6065,7 @@ function createFacilityMarker(facility) {
         updateFacilitiesDisplay();
         
         // Update popup
-        facility.marker.setPopupContent(getFacilityPopupContent(facility));
+        setPopupContent(facility.marker, getFacilityPopupContent(facility));
     });
     
     // Create service radius circle
@@ -5292,31 +6076,31 @@ function createFacilityMarker(facility) {
 function createFacilityCircle(facility) {
     // Remove old circle and handle if they exist
     if (facility.circle) {
-        map.removeLayer(facility.circle);
+        removeOverlay(facility.circle);
     }
     if (facility.resizeHandle) {
-        map.removeLayer(facility.resizeHandle);
+        removeOverlay(facility.resizeHandle);
     }
     
     // Create service radius circle using facility's own radius
-    facility.circle = L.circle([facility.lat, facility.lng], {
+    facility.circle = new google.maps.Circle({
+        map: map,
+        center: { lat: facility.lat, lng: facility.lng },
         radius: facility.serviceRadius * 1609.34,  // miles to meters
-        color: facility.color,
+        strokeColor: facility.color,
+        strokeOpacity: 1,
+        strokeWeight: 2,
         fillColor: facility.color,
         fillOpacity: 0.1,
-        weight: 2,
-        interactive: false
-    }).addTo(map);
+        clickable: false
+    });
     
     // Calculate position for resize handle (on the circle edge, to the east)
     const handleLat = facility.lat;
     const handleLng = facility.lng + (facility.serviceRadius / 69); // Approximate degrees per mile
     
     // Create resize handle
-    facility.resizeHandle = L.marker([handleLat, handleLng], {
-        icon: L.divIcon({
-            className: 'resize-handle',
-            html: `<div style="
+    facility.resizeHandle = makeMarker(handleLat, handleLng, `<div style="
                 background: ${facility.color};
                 width: 12px;
                 height: 12px;
@@ -5324,34 +6108,23 @@ function createFacilityCircle(facility) {
                 border: 2px solid white;
                 box-shadow: 0 0 8px rgba(0,0,0,0.4);
                 cursor: ew-resize;
-            "></div>`,
-            iconSize: [12, 12],
-            iconAnchor: [6, 6]
-        }),
-        draggable: true,
-        zIndexOffset: 500
-    }).addTo(map);
+            "></div>`, { draggable: true, zIndex: 500 });
     
     // Create a dynamic label for showing radius during resize
     let radiusLabel = null;
     
     // Handle drag events for resizing
-    facility.resizeHandle.on('dragstart', function(e) {
-        // Create a tooltip-style label that will follow the drag
-        radiusLabel = L.tooltip({
-            permanent: true,
-            direction: 'top',
-            offset: [0, -20],
-            className: 'radius-label',
-            opacity: 1
-        })
-        .setLatLng(e.target.getLatLng())
-        .setContent(`<strong style="font-size: 14px; color: ${facility.color};">${facility.serviceRadius.toFixed(1)} miles</strong>`)
-        .addTo(map);
+    facility.resizeHandle.addListener('dragstart', function(e) {
+        // Floating label that follows the cursor during the drag. Google Maps
+        // has no permanent-tooltip primitive, so this is a positioned div.
+        radiusLabel = makeRadiusLabel(
+            `<strong style="font-size: 14px; color: ${facility.color};">${facility.serviceRadius.toFixed(1)} miles</strong>`);
+        radiusLabel.moveToEvent(e.domEvent);
     });
     
-    facility.resizeHandle.on('drag', function(e) {
-        const handlePos = e.target.getLatLng();
+    facility.resizeHandle.addListener('drag', function(e) {
+        const handlePos = toLatLngLiteral(e.latLng);
+        if (!handlePos) return;
         const newRadius = calculateDistance(facility.lat, facility.lng, handlePos.lat, handlePos.lng);
         
         // Constrain display (but don't constrain the drag itself yet)
@@ -5362,18 +6135,19 @@ function createFacilityCircle(facility) {
         
         // Update the dynamic label
         if (radiusLabel) {
-            radiusLabel.setLatLng(handlePos);
+            radiusLabel.moveToEvent(e.domEvent);
             radiusLabel.setContent(`<strong style="font-size: 14px; color: ${facility.color};">${displayRadius.toFixed(1)} miles</strong>`);
         }
     });
     
-    facility.resizeHandle.on('dragend', function(e) {
-        const handlePos = e.target.getLatLng();
+    facility.resizeHandle.addListener('dragend', function(e) {
+        const handlePos = toLatLngLiteral(e.latLng);
+        if (!handlePos) return;
         const newRadius = calculateDistance(facility.lat, facility.lng, handlePos.lat, handlePos.lng);
         
         // Remove the dynamic label
         if (radiusLabel) {
-            map.removeLayer(radiusLabel);
+            removeOverlay(radiusLabel);
             radiusLabel = null;
         }
         
@@ -5391,15 +6165,11 @@ function createFacilityCircle(facility) {
     });
     
     // Bind tooltip to resize handle
-    facility.resizeHandle.bindTooltip(`
+    bindTooltip(facility.resizeHandle, `
         <strong>Facility ${facility.id} Radius</strong><br>
         ${facility.serviceRadius.toFixed(1)} miles<br>
         <em style="font-size: 0.9em;">Drag to resize</em>
-    `, {
-        direction: 'right',
-        offset: [10, 0],
-        opacity: 0.95
-    });
+    `);
 }
 
 // Get popup content for facility
@@ -5442,6 +6212,7 @@ function getFacilityPopupContent(facility) {
             </div>
             <hr style="margin: 8px 0;">
             <em style="font-size: 0.9em;">💡 Drag marker to reposition<br>🔵 Drag handle to resize radius</em>
+            ${viewLinks(facility.lat, facility.lng, 'Facility ' + facility.id)}
         </div>
     `;
 }
@@ -5454,9 +6225,9 @@ function removeFacility(facilityId) {
     const facility = facilities[index];
     
     // Remove from map
-    if (facility.marker) map.removeLayer(facility.marker);
-    if (facility.circle) map.removeLayer(facility.circle);
-    if (facility.resizeHandle) map.removeLayer(facility.resizeHandle);
+    if (facility.marker) removeOverlay(facility.marker);
+    if (facility.circle) removeOverlay(facility.circle);
+    if (facility.resizeHandle) removeOverlay(facility.resizeHandle);
     
     // Remove from array
     facilities.splice(index, 1);
@@ -5474,9 +6245,9 @@ function removeFacility(facilityId) {
         
         // Recreate markers with new IDs and colors
         facilities.forEach(f => {
-            if (f.marker) map.removeLayer(f.marker);
-            if (f.circle) map.removeLayer(f.circle);
-            if (f.resizeHandle) map.removeLayer(f.resizeHandle);
+            if (f.marker) removeOverlay(f.marker);
+            if (f.circle) removeOverlay(f.circle);
+            if (f.resizeHandle) removeOverlay(f.resizeHandle);
             createFacilityMarker(f);
         });
         recalculateFacilities();
@@ -5490,9 +6261,9 @@ function removeFacility(facilityId) {
 // Clear all facilities
 function clearAllFacilities() {
     facilities.forEach(facility => {
-        if (facility.marker) map.removeLayer(facility.marker);
-        if (facility.circle) map.removeLayer(facility.circle);
-        if (facility.resizeHandle) map.removeLayer(facility.resizeHandle);
+        if (facility.marker) removeOverlay(facility.marker);
+        if (facility.circle) removeOverlay(facility.circle);
+        if (facility.resizeHandle) removeOverlay(facility.resizeHandle);
     });
     
     facilities = [];
@@ -5766,7 +6537,7 @@ function recalculateFacilities() {
         
         // Update popup
         if (facility.marker) {
-            facility.marker.setPopupContent(getFacilityPopupContent(facility));
+            setPopupContent(facility.marker, getFacilityPopupContent(facility));
         }
         
         // Update circle
@@ -5795,7 +6566,7 @@ function updateWellColorsByFacility() {
         
         if (isFiltered) {
             // Keep filtered wells grey
-            marker.setStyle({
+            setWellStyle(marker, {
                 fillColor: '#808080',
                 color: '#ffffff',
                 radius: 4,
@@ -5821,7 +6592,7 @@ function updateWellColorsByFacility() {
         // Only color if within the nearest facility's service radius
         if (assignedFacility && minDist <= assignedFacility.serviceRadius) {
             // Color by facility
-            marker.setStyle({
+            setWellStyle(marker, {
                 fillColor: assignedFacility.color,
                 color: '#ffffff',
                 radius: 4,
@@ -5830,7 +6601,7 @@ function updateWellColorsByFacility() {
             });
         } else {
             // Active but not assigned (outside all radii)
-            marker.setStyle({
+            setWellStyle(marker, {
                 fillColor: '#4a9eff',
                 color: '#ffffff',
                 radius: 4,
@@ -5849,7 +6620,7 @@ function resetWellColors() {
         const wellKey = getWellKey(data);
         const isFiltered = !filteredKeys.has(wellKey);
         
-        marker.setStyle({
+        setWellStyle(marker, {
             fillColor: isFiltered ? '#808080' : '#4a9eff',
             color: '#ffffff',
             radius: 4,
@@ -6016,7 +6787,7 @@ function updateFacilityMarketShare(facilityId, newValue) {
     
     // Update popup if open
     if (facility.marker) {
-        facility.marker.setPopupContent(getFacilityPopupContent(facility));
+        setPopupContent(facility.marker, getFacilityPopupContent(facility));
     }
     
     // Update combined results (doesn't rebuild facility list)
@@ -7535,8 +8306,8 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 timestamp: new Date().toISOString(),
                 facilities: facilities.map(f => ({
                     id: f.id,
-                    lat: f.marker.getLatLng().lat,
-                    lng: f.marker.getLatLng().lng,
+                    lat: f.marker.__pos().lat,
+                    lng: f.marker.__pos().lng,
                     serviceRadius: f.serviceRadius,
                     marketShare: f.marketShare,
                     color: f.color
@@ -7733,8 +8504,8 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 },
                 facilities: facilities.map(f => ({
                     id: f.id,
-                    lat: f.marker.getLatLng().lat,
-                    lng: f.marker.getLatLng().lng,
+                    lat: f.marker.__pos().lat,
+                    lng: f.marker.__pos().lng,
                     serviceRadius: f.serviceRadius,
                     marketShare: f.marketShare,
                     color: f.color
@@ -7810,8 +8581,8 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 },
                 facilities: facilities.map(f => ({
                     id: f.id,
-                    lat: f.marker.getLatLng().lat,
-                    lng: f.marker.getLatLng().lng,
+                    lat: f.marker.__pos().lat,
+                    lng: f.marker.__pos().lng,
                     serviceRadius: f.serviceRadius,
                     marketShare: f.marketShare,
                     color: f.color
@@ -8645,10 +9416,8 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         // Initialize and verify libraries
         console.log('=== INITIALIZATION ===');
         console.log('XLSX library loaded:', typeof XLSX !== 'undefined');
-        console.log('Leaflet loaded:', typeof L !== 'undefined');
-        console.log('dom-to-image loaded:', typeof domtoimage !== 'undefined');
+        console.log('Google Maps bootstrap present:', typeof google !== 'undefined' && !!(google.maps && google.maps.importLibrary));
         console.log('jsPDF loaded:', typeof window.jspdf !== 'undefined');
-        console.log('html2canvas loaded:', typeof html2canvas !== 'undefined');
         console.log('File input element:', document.getElementById('fileInput') !== null);
         console.log('Sheet selector element:', document.getElementById('sheetSelector') !== null);
         
@@ -8661,14 +9430,8 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             console.warn('WARNING: jsPDF library not loaded. PDF export will not work.');
         }
         
-        if (typeof html2canvas === 'undefined') {
-            console.warn('WARNING: html2canvas library not loaded. PDF export will not work.');
-        }
-        
-        if (typeof domtoimage === 'undefined') {
-            console.warn('WARNING: dom-to-image library not loaded. Map capture quality may be reduced.');
-        }
-        
+        // v2.0: the map is asynchronous now, because the Maps JS API libraries
+        // load on demand. Anything that draws on the map must await MAP_READY.
         initMap();
         
         // Populate saved scenarios dropdown on load
@@ -8678,10 +9441,231 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         // PDF EXPORT FUNCTIONALITY
         // ========================================
         
+        // ========================================
+        // PDF MAP IMAGE RENDERER  (v2.0)
+        // ----------------------------------------
+        // The on-screen map is now Google's WebGL vector renderer, and neither
+        // html2canvas nor dom-to-image can read pixels out of a WebGL canvas --
+        // capturing #map would yield a blank rectangle. Google's Static Maps
+        // API is not an option for compositing either: it sends no CORS header,
+        // so drawing its response into a canvas taints the canvas and
+        // toDataURL() throws.
+        //
+        // So the PDF map is rendered independently: Esri imagery tiles (which
+        // do send CORS headers) are stitched onto a canvas, then the wells,
+        // radius rings and facility pins are drawn on top with the same
+        // Mercator maths the tiles use. This also means the export no longer
+        // disturbs the user's on-screen view, and it has no marker-count or
+        // URL-length ceiling.
+        // ========================================
+
+        const PDF_TILE_LAYERS = [
+            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+            'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
+        ];
+        const TILE_SIZE = 256;
+
+        // --- Web Mercator helpers (world pixel space at a given zoom) ---
+        function mercX(lng, z) { return (lng + 180) / 360 * TILE_SIZE * Math.pow(2, z); }
+        function mercY(lat, z) {
+            const r = lat * Math.PI / 180;
+            const y = Math.log(Math.tan(r) + 1 / Math.cos(r));
+            return (1 - y / Math.PI) / 2 * TILE_SIZE * Math.pow(2, z);
+        }
+        function metresPerPixel(lat, z) {
+            return 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, z);
+        }
+
+        function loadTile(url) {
+            return new Promise(resolve => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';   // required so the canvas stays untainted
+                img.onload = () => resolve(img);
+                img.onerror = () => resolve(null);
+                img.src = url;
+                setTimeout(() => resolve(null), 8000);
+            });
+        }
+
+        // Render the analysis map to a PNG data URL sized outW x outH.
+        async function renderMapImageForPdf(bbox, outW, outH, maxZoom) {
+            outW = outW || 1400;
+            outH = outH || 900;
+            maxZoom = maxZoom || 10;
+
+            // Pick the largest zoom whose bbox still fits the output canvas.
+            let z = maxZoom;
+            for (; z > 2; z--) {
+                const w = Math.abs(mercX(bbox.east, z) - mercX(bbox.west, z));
+                const h = Math.abs(mercY(bbox.south, z) - mercY(bbox.north, z));
+                if (w <= outW && h <= outH) break;
+            }
+
+            const centreLat = (bbox.north + bbox.south) / 2;
+            const centreLng = (bbox.east + bbox.west) / 2;
+            const cx = mercX(centreLng, z);
+            const cy = mercY(centreLat, z);
+            // Top-left of the output canvas, in world pixels.
+            const originX = cx - outW / 2;
+            const originY = cy - outH / 2;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = outW;
+            canvas.height = outH;
+            const ctx = canvas.getContext('2d');
+
+            // Base fill, so a tile failure degrades to a flat backdrop rather
+            // than transparency.
+            ctx.fillStyle = '#1a2634';
+            ctx.fillRect(0, 0, outW, outH);
+
+            const worldTiles = Math.pow(2, z);
+            const tx0 = Math.floor(originX / TILE_SIZE), tx1 = Math.floor((originX + outW) / TILE_SIZE);
+            const ty0 = Math.floor(originY / TILE_SIZE), ty1 = Math.floor((originY + outH) / TILE_SIZE);
+
+            let drawn = 0, attempted = 0;
+            for (const tpl of PDF_TILE_LAYERS) {
+                const jobs = [];
+                for (let tx = tx0; tx <= tx1; tx++) {
+                    for (let ty = ty0; ty <= ty1; ty++) {
+                        if (ty < 0 || ty >= worldTiles) continue;
+                        const wrapX = ((tx % worldTiles) + worldTiles) % worldTiles;
+                        const url = tpl.replace('{z}', z).replace('{x}', wrapX).replace('{y}', ty);
+                        attempted++;
+                        jobs.push(loadTile(url).then(img => ({
+                            img,
+                            px: tx * TILE_SIZE - originX,
+                            py: ty * TILE_SIZE - originY
+                        })));
+                    }
+                }
+                const results = await Promise.all(jobs);
+                results.forEach(r => {
+                    if (r.img) { ctx.drawImage(r.img, r.px, r.py, TILE_SIZE, TILE_SIZE); drawn++; }
+                });
+            }
+            console.log(`PDF map: zoom ${z}, ${drawn}/${attempted} tiles drawn`);
+
+            // --- project a coordinate into canvas space ---
+            const project = (lat, lng) => ({
+                x: mercX(lng, z) - originX,
+                y: mercY(lat, z) - originY
+            });
+            const mpp = metresPerPixel(centreLat, z);
+
+            // --- radius rings (drawn under the dots) ---
+            ctx.lineWidth = 2;
+            facilities.forEach(f => {
+                const pos = f.marker ? f.marker.__pos() : { lat: f.lat, lng: f.lng };
+                if (!pos) return;
+                const p = project(pos.lat, pos.lng);
+                const rPx = (f.serviceRadius * 1609.34) / mpp;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, rPx, 0, Math.PI * 2);
+                ctx.fillStyle = hexToRgba(f.color, 0.12);
+                ctx.fill();
+                ctx.strokeStyle = f.color;
+                ctx.stroke();
+            });
+
+            // Landfill selection rings
+            selectedLandfills.forEach((settings, index) => {
+                const lf = landfills[index];
+                if (!lf) return;
+                const p = project(lf.lat, lf.lng);
+                const rPx = (settings.radius * 1609.34) / mpp;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, rPx, 0, Math.PI * 2);
+                ctx.fillStyle = hexToRgba(cssVar('--primary', '#0a4d3c'), 0.10);
+                ctx.fill();
+                ctx.strokeStyle = cssVar('--primary', '#0a4d3c');
+                ctx.stroke();
+            });
+
+            // --- well dots, coloured exactly as the live map colours them ---
+            const liveColour = {};
+            wellMarkers.forEach(({ marker, data }) => {
+                const ic = marker.getIcon && marker.getIcon();
+                if (ic && ic.fillColor) liveColour[getWellKey(data)] = ic.fillColor;
+            });
+            let wellsDrawn = 0;
+            filteredWellData.forEach(w => {
+                if (!w.lat || !w.lng) return;
+                const p = project(Number(w.lat), Number(w.lng));
+                if (p.x < -20 || p.y < -20 || p.x > outW + 20 || p.y > outH + 20) return;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2);
+                ctx.fillStyle = liveColour[getWellKey(w)] || '#4a9eff';
+                ctx.globalAlpha = 0.85;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+                ctx.lineWidth = 0.8;
+                ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+                ctx.stroke();
+                wellsDrawn++;
+            });
+            console.log(`PDF map: ${wellsDrawn} wells drawn`);
+
+            // --- landfill markers ---
+            ctx.lineWidth = 2;
+            landfills.forEach(lf => {
+                const p = project(lf.lat, lf.lng);
+                if (p.x < -20 || p.y < -20 || p.x > outW + 20 || p.y > outH + 20) return;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+                ctx.fillStyle = cssVar('--accent', '#ff6b35');
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+            });
+
+            // --- numbered facility pins, drawn last so they sit on top ---
+            ctx.font = 'bold 15px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            facilities.forEach(f => {
+                const pos = f.marker ? f.marker.__pos() : { lat: f.lat, lng: f.lng };
+                if (!pos) return;
+                const p = project(pos.lat, pos.lng);
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 15, 0, Math.PI * 2);
+                ctx.fillStyle = f.color;
+                ctx.fill();
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(String(f.id), p.x, p.y);
+            });
+
+            // Attribution, since these are Esri tiles rather than Google's.
+            ctx.font = '11px Inter, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'bottom';
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(outW - 150, outH - 18, 150, 18);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('Imagery © Esri', outW - 6, outH - 4);
+
+            if (drawn === 0) {
+                console.warn('PDF map: no imagery tiles loaded; overlays drawn on flat background.');
+            }
+            return canvas.toDataURL('image/png');
+        }
+
+        // #rrggbb -> rgba() with the given alpha; passes through anything else.
+        function hexToRgba(hex, alpha) {
+            if (typeof hex !== 'string' || hex[0] !== '#' || hex.length < 7) return hex;
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `rgba(${r},${g},${b},${alpha})`;
+        }
+
         async function exportFacilityAnalysisToPDF() {
             console.log('=== PDF EXPORT STARTED ===');
             console.log('jsPDF available:', typeof window.jspdf !== 'undefined');
-            console.log('html2canvas available:', typeof html2canvas !== 'undefined');
             console.log('facilities length:', facilities.length);
             
             if (facilities.length === 0) {
@@ -8693,12 +9677,6 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             if (typeof window.jspdf === 'undefined') {
                 alert('PDF library not loaded. Please refresh the page and try again.');
                 console.error('jsPDF library not found');
-                return;
-            }
-
-            if (typeof html2canvas === 'undefined') {
-                alert('Canvas library not loaded. Please refresh the page and try again.');
-                console.error('html2canvas library not found');
                 return;
             }
 
@@ -8826,163 +9804,83 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
 
                 try {
                     console.log('Starting map capture...');
-                    
-                    // Store current map view
-                    const originalCenter = map.getCenter();
-                    const originalZoom = map.getZoom();
-                    
-                    // Calculate bounds focusing on Permian Basin with facilities and wells
-                    const bounds = L.latLngBounds();
+
+                    // Collect the bounding box to render. Nothing here touches
+                    // the live map, so the user's view is left exactly as it was.
+                    let north = -90, south = 90, east = -180, west = 180;
                     let hasData = false;
-                    
-                    // Add all facility positions and their service radii
+                    const extend = (lat, lng) => {
+                        if (!isFinite(lat) || !isFinite(lng)) return;
+                        north = Math.max(north, lat); south = Math.min(south, lat);
+                        east  = Math.max(east,  lng); west  = Math.min(west,  lng);
+                        hasData = true;
+                    };
+
+                    // Facility positions plus their full service-radius extent
                     facilities.forEach(facility => {
-                        if (facility.marker) {
-                            const latlng = facility.marker.getLatLng();
-                            bounds.extend(latlng);
-                            
-                            // Add service radius boundary points
-                            const radiusMiles = facility.serviceRadius || 25;
-                            const radiusMeters = radiusMiles * 1609.34;
-                            const radiusDegrees = radiusMeters / 111320;
-                            
-                            // Extend bounds to include full circle
-                            bounds.extend([latlng.lat + radiusDegrees, latlng.lng]);
-                            bounds.extend([latlng.lat - radiusDegrees, latlng.lng]);
-                            bounds.extend([latlng.lat, latlng.lng + radiusDegrees / Math.cos(latlng.lat * Math.PI / 180)]);
-                            bounds.extend([latlng.lat, latlng.lng - radiusDegrees / Math.cos(latlng.lat * Math.PI / 180)]);
-                            
-                            hasData = true;
-                        }
+                        const pos = facility.marker ? facility.marker.__pos()
+                                                    : { lat: facility.lat, lng: facility.lng };
+                        if (!pos) return;
+                        const radiusMiles = facility.serviceRadius || 25;
+                        const radiusDegrees = (radiusMiles * 1609.34) / 111320;
+                        const lngSpan = radiusDegrees / Math.cos(pos.lat * Math.PI / 180);
+                        extend(pos.lat + radiusDegrees, pos.lng);
+                        extend(pos.lat - radiusDegrees, pos.lng);
+                        extend(pos.lat, pos.lng + lngSpan);
+                        extend(pos.lat, pos.lng - lngSpan);
                     });
-                    
-                    // Add well locations for context
+
+                    // Selected landfills and their rings
+                    selectedLandfills.forEach((settings, index) => {
+                        const lf = landfills[index];
+                        if (!lf) return;
+                        const radiusDegrees = (settings.radius * 1609.34) / 111320;
+                        const lngSpan = radiusDegrees / Math.cos(lf.lat * Math.PI / 180);
+                        extend(lf.lat + radiusDegrees, lf.lng);
+                        extend(lf.lat - radiusDegrees, lf.lng);
+                        extend(lf.lat, lf.lng + lngSpan);
+                        extend(lf.lat, lf.lng - lngSpan);
+                    });
+
+                    // Well locations for context
                     filteredWellData.forEach(well => {
                         if (well.lat && well.lng && Math.abs(well.lat) > 0.0001 && Math.abs(well.lng) > 0.0001) {
-                            bounds.extend([well.lat, well.lng]);
-                            hasData = true;
+                            extend(Number(well.lat), Number(well.lng));
                         }
                     });
-                    
+
                     // If no data, use Permian Basin default
                     if (!hasData) {
-                        bounds.extend([32.5, -103.5]); // North Permian
-                        bounds.extend([31.0, -101.5]); // South Permian
-                    }
-                    
-                    console.log('Calculated bounds:', bounds);
-                    
-                    // Fit map to calculated bounds
-                    map.fitBounds(bounds, { 
-                        padding: [50, 50],  // Reduced padding for closer zoom
-                        maxZoom: 10,        // Increased zoom level for closer view
-                        animate: false
-                    });
-                    
-                    // Force immediate map update
-                    map.invalidateSize(true);
-                    
-                    // Force redraw of all layers
-                    let layerCount = 0;
-                    map.eachLayer(layer => {
-                        layerCount++;
-                        if (layer.redraw) {
-                            layer.redraw();
-                        }
-                        if (layer.bringToFront) {
-                            layer.bringToFront();
-                        }
-                    });
-                    
-                    console.log('Total layers on map:', layerCount);
-                    console.log('Facilities to capture:', facilities.length);
-                    console.log('Wells to capture:', filteredWellData.length);
-                    
-                    // Wait for tiles and all layers to load
-                    await new Promise(resolve => {
-                        setTimeout(resolve, 2500); // Longer wait for everything to render
-                    });
-                    
-                    console.log('Attempting map capture...');
-                    
-                    const mapElement = document.getElementById('map');
-                    
-                    // Capture cascade (v1.14).
-                    // Previously html2canvas was only tried when domtoimage was
-                    // *undefined* -- so if dom-to-image loaded but THREW, nothing
-                    // else was attempted. dom-to-image inlines images over XHR and
-                    // throws outright on cross-origin tiles that lack CORS headers,
-                    // which is exactly what a Google basemap can produce. Each
-                    // method is now tried in turn until one yields an image.
-                    let imgData = null;
-                    const captureErrors = [];
-
-                    if (!imgData && typeof domtoimage !== 'undefined') {
-                        try {
-                            console.log('Map capture: trying dom-to-image');
-                            imgData = await domtoimage.toPng(mapElement, {
-                                quality: 1,
-                                bgcolor: '#ffffff',
-                                width: mapElement.offsetWidth,
-                                height: mapElement.offsetHeight,
-                                style: {
-                                    transform: 'scale(1)',
-                                    transformOrigin: 'top left'
-                                }
-                            });
-                            console.log('Map capture: dom-to-image succeeded');
-                        } catch (e) {
-                            // dom-to-image rejects with a bare Event on image
-                            // fetch failure, which has no useful .message.
-                            const why = (e && e.type) ? ('image fetch blocked (' + e.type + ')') : (e && e.message) || String(e);
-                            captureErrors.push('dom-to-image: ' + why);
-                            console.warn('Map capture: dom-to-image failed -', why);
-                        }
+                        extend(32.5, -103.5); // North Permian
+                        extend(31.0, -101.5); // South Permian
                     }
 
-                    if (!imgData && typeof html2canvas !== 'undefined') {
-                        try {
-                            console.log('Map capture: trying html2canvas (useCORS)');
-                            const canvas = await html2canvas(mapElement, {
-                                useCORS: true,
-                                allowTaint: false,
-                                backgroundColor: '#ffffff',
-                                width: mapElement.offsetWidth,
-                                height: mapElement.offsetHeight,
-                                scale: 2,
-                                logging: false,
-                                imageTimeout: 0,
-                                removeContainer: false
-                            });
-                            imgData = canvas.toDataURL('image/png');
-                            console.log('Map capture: html2canvas succeeded');
-                        } catch (e) {
-                            const why = (e && e.message) || String(e);
-                            captureErrors.push('html2canvas: ' + why);
-                            console.warn('Map capture: html2canvas failed -', why);
-                        }
-                    }
+                    // A little breathing room around the data
+                    const padLat = Math.max((north - south) * 0.06, 0.05);
+                    const padLng = Math.max((east - west) * 0.06, 0.05);
+                    const bbox = {
+                        north: Math.min(north + padLat, 85),
+                        south: Math.max(south - padLat, -85),
+                        east: east + padLng,
+                        west: west - padLng
+                    };
 
-                    if (!imgData) {
-                        throw new Error(captureErrors.length
-                            ? captureErrors.join(' / ')
-                            : 'no capture library available');
-                    }
+                    console.log('PDF map bbox:', bbox);
+                    console.log('Facilities to render:', facilities.length);
+                    console.log('Wells to render:', filteredWellData.length);
 
-                    console.log('Map captured successfully');
-                    
+                    const OUT_W = 1400, OUT_H = 900;
+                    const imgData = await renderMapImageForPdf(bbox, OUT_W, OUT_H, 11);
+                    if (!imgData) throw new Error('map image renderer returned nothing');
+
+                    console.log('Map rendered successfully');
+
                     const imgWidth = pageWidth - (margin * 2);
-                    const mapHeight = mapElement.offsetHeight;
-                    const mapWidth = mapElement.offsetWidth;
-                    const imgHeight = (mapHeight * imgWidth) / mapWidth;
-                    
+                    const imgHeight = (OUT_H * imgWidth) / OUT_W;
+
                     pdf.addImage(imgData, 'PNG', margin, yPosition, imgWidth, Math.min(imgHeight, 130));
                     yPosition += Math.min(imgHeight, 130) + 10;
-                    
-                    // Restore original map view
-                    map.setView(originalCenter, originalZoom);
-                    map.invalidateSize();
-                    
+
                     console.log('Map capture complete');
                 } catch (error) {
                     console.error('Error capturing map:', error);
@@ -9017,8 +9915,8 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                     pdf.setTextColor(0, 0, 0);
                     pdf.setFontSize(9);
                     pdf.setFont('helvetica', 'normal');
-                    const facilityLat = facility.marker.getLatLng().lat.toFixed(4);
-                    const facilityLng = facility.marker.getLatLng().lng.toFixed(4);
+                    const facilityLat = facility.marker.__pos().lat.toFixed(4);
+                    const facilityLng = facility.marker.__pos().lng.toFixed(4);
                     pdf.text(`Location: ${facilityLat}°, ${facilityLng}° | Service Radius: ${facility.serviceRadius || 25} miles`, margin, yPosition + 5);
                     yPosition += 12;
 
