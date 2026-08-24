@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 2.1                                                 ║
+    ║  VERSION: 2.2                                                 ║
     ║  Last Updated: August 2026                                    ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -18,7 +18,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v2.1</title>
+    <title>Contaminated Soil Geospatial Analysis v2.2</title>
 
     <!-- ═══════════════════════════════════════════════════════════════
          GOOGLE MAPS JAVASCRIPT API  (v2.0 - native, Leaflet removed)
@@ -42,6 +42,12 @@
         const GOOGLE_MAPS_API_KEY = 'AIzaSyCQSBLuBVlCe18HHdVk-z0ur6mdv5v5fLM';
         const GOOGLE_MAP_ID       = 'DEMO_MAP_ID';
         const GOOGLE_BASEMAP_TYPE = 'hybrid';
+
+        // Tilt and rotation require VECTOR rendering, which costs more GPU time
+        // than RASTER. On a large dataset raster noticeably outruns vector. Set
+        // this to false to trade the 3D Tilt button for the faster renderer --
+        // the photorealistic 3D view and Street View both still work.
+        const ENABLE_3D_TILT = true;
 
         // Official inline bootstrap loader. Libraries are pulled on demand via
         // google.maps.importLibrary(), so nothing loads until initMap asks.
@@ -1046,6 +1052,15 @@
         .map3d-close:hover { background: #5a6578; }
         #map3dHost { flex: 1 1 auto; min-height: 0; position: relative; }
         #map3dHost gmp-map-3d { width: 100%; height: 100%; display: block; }
+        .map3d-popover {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.82rem;
+            line-height: 1.55;
+            color: #222;
+            min-width: 190px;
+            max-width: 280px;
+        }
+        .map3d-popover strong { color: #111; }
 
         /* --- Native Google Maps support (v2.0) -------------------------- */
 
@@ -1541,7 +1556,7 @@
         <div class="control-panel">
             <div class="header">
                 <h1>Contaminated Soil<br>Geospatial Analysis</h1>
-                <div class="subtitle" id="appVersionLabel">v2.1</div>
+                <div class="subtitle" id="appVersionLabel">v2.2</div>
                 <div class="subtitle">Distance-based volume tracking system</div>
             </div>
 
@@ -2246,7 +2261,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "2.1";
+        const APP_VERSION = "2.2";
         // Keep the on-screen version label in sync with APP_VERSION.
         document.addEventListener('DOMContentLoaded', function () {
             const el = document.getElementById('appVersionLabel');
@@ -2497,6 +2512,16 @@
                 clickable: true
             });
             m.__isWell = true;
+            // Seed the style cache so setWellStyle can detect no-ops from the
+            // very first update rather than always applying once.
+            m.__style = {
+                radius: style.radius != null ? style.radius : 4,
+                fillColor: style.fillColor || '#4a9eff',
+                fillOpacity: style.fillOpacity != null ? style.fillOpacity : 0.6,
+                color: style.color || '#ffffff',
+                weight: style.weight != null ? style.weight : 1,
+                opacity: style.opacity != null ? style.opacity : 0.8
+            };
             return m;
         }
         function wellIcon(st) {
@@ -2511,17 +2536,78 @@
             };
         }
         // Stands in for Leaflet's circleMarker.setStyle().
+        //
+        // v2.2 perf: the analysis paths call this once per well on every update,
+        // and the great majority of those calls asked for the style the marker
+        // already had. Each setIcon() forces the API to rebuild and redraw that
+        // marker, so with a few thousand wells a single slider nudge cost
+        // thousands of pointless redraws. The resolved style is now compared
+        // against the last one applied and setIcon() is skipped when identical.
+        let _wellStyleSkipped = 0, _wellStyleApplied = 0;
         function setWellStyle(marker, st) {
             if (!marker || !marker.setIcon) return;
-            const prev = marker.getIcon() || {};
-            marker.setIcon(wellIcon({
-                radius:      st.radius      != null ? st.radius      : prev.scale,
-                fillColor:   st.fillColor   != null ? st.fillColor   : prev.fillColor,
-                fillOpacity: st.fillOpacity != null ? st.fillOpacity : prev.fillOpacity,
-                color:       st.color       != null ? st.color       : prev.strokeColor,
-                weight:      st.weight      != null ? st.weight      : prev.strokeWeight,
-                opacity:     st.opacity     != null ? st.opacity     : prev.strokeOpacity
-            }));
+            const prev = marker.__style || marker.getIcon() || {};
+            const next = {
+                radius:      st.radius      != null ? st.radius      : (prev.radius      != null ? prev.radius      : prev.scale),
+                fillColor:   st.fillColor   != null ? st.fillColor   : (prev.fillColor   != null ? prev.fillColor   : '#4a9eff'),
+                fillOpacity: st.fillOpacity != null ? st.fillOpacity : (prev.fillOpacity != null ? prev.fillOpacity : 0.6),
+                color:       st.color       != null ? st.color       : (prev.color       != null ? prev.color       : (prev.strokeColor || '#ffffff')),
+                weight:      st.weight      != null ? st.weight      : (prev.weight      != null ? prev.weight      : 1),
+                opacity:     st.opacity     != null ? st.opacity     : (prev.opacity     != null ? prev.opacity     : 0.8)
+            };
+            const last = marker.__style;
+            if (last
+                && last.radius === next.radius
+                && last.fillColor === next.fillColor
+                && last.fillOpacity === next.fillOpacity
+                && last.color === next.color
+                && last.weight === next.weight
+                && last.opacity === next.opacity) {
+                _wellStyleSkipped++;
+                return;
+            }
+            marker.__style = next;
+            _wellStyleApplied++;
+            marker.setIcon(wellIcon(next));
+        }
+        function wellStyleStats() {
+            return { applied: _wellStyleApplied, skipped: _wellStyleSkipped };
+        }
+        function resetWellStyleStats() { _wellStyleApplied = 0; _wellStyleSkipped = 0; }
+
+        // ---- shared well hover tooltip (v2.2) ----------------------------
+        // A single reusable element for every well, rather than one per well.
+        let _wellTipEl = null;
+        function wellTipEl() {
+            if (!_wellTipEl) {
+                _wellTipEl = document.createElement('div');
+                _wellTipEl.className = 'gmap-tooltip well-tooltip';
+                document.body.appendChild(_wellTipEl);
+            }
+            return _wellTipEl;
+        }
+        function showWellTooltip(well, isFiltered, ev) {
+            const el = wellTipEl();
+            el.innerHTML = `
+                    <div style="font-weight: 600; margin-bottom: 4px; color: ${isFiltered ? '#ff6b6b' : '#4a9eff'};">
+                        ${isFiltered ? '⚠ FILTERED OUT' : '✓ ACTIVE'}
+                    </div>
+                    <div><strong>API:</strong> ${well.api}</div>
+                    <div><strong>Lease:</strong> ${well.lease}</div>
+                    <div><strong>Operator:</strong> ${well.generator}</div>
+                    <div><strong>Volume:</strong> ${formatNumber(well.quantity, 2)} CY</div>
+                `;
+            el.style.display = 'block';
+            moveWellTooltip(ev);
+        }
+        function moveWellTooltip(ev) {
+            const de = ev && ev.domEvent;
+            if (!de || !_wellTipEl) return;
+            _wellTipEl.style.left = (de.clientX + 15) + 'px';
+            _wellTipEl.style.top = (de.clientY - 10) + 'px';
+        }
+        function hideWellTooltip() {
+            if (_wellTipEl) _wellTipEl.style.display = 'none';
         }
 
         // ---- floating label (replaces the L.tooltip used while dragging) ---
@@ -2584,11 +2670,15 @@
                     // VECTOR is required for tilt and heading. A div-based map
                     // defaults to RASTER, on which setTilt/setHeading silently
                     // do nothing. This option overrides the Map ID's own setting.
-                    renderingType: google.maps.RenderingType.VECTOR,
+                    // RASTER is measurably faster with thousands of markers, so
+                    // ENABLE_3D_TILT lets that trade be made explicitly.
+                    renderingType: ENABLE_3D_TILT
+                        ? google.maps.RenderingType.VECTOR
+                        : google.maps.RenderingType.RASTER,
                     tilt: 0,
-                    tiltInteractionEnabled: true,
-                    headingInteractionEnabled: true,
-                    rotateControl: true,
+                    tiltInteractionEnabled: ENABLE_3D_TILT,
+                    headingInteractionEnabled: ENABLE_3D_TILT,
+                    rotateControl: ENABLE_3D_TILT,
                     mapTypeControl: false,        // replaced by our own switcher
                     streetViewControl: true,      // pegman, in addition to the pane
                     fullscreenControl: false,
@@ -2713,14 +2803,29 @@
                     }
                 }
             });
-            bar.appendChild(tiltBtn);
+            if (ENABLE_3D_TILT) bar.appendChild(tiltBtn);
 
             // Reset the compass back to north-up.
             const northBtn = document.createElement('button');
             northBtn.textContent = 'North';
             northBtn.title = 'Reset rotation to north';
             northBtn.addEventListener('click', () => { map.setHeading(0); });
-            bar.appendChild(northBtn);
+            if (ENABLE_3D_TILT) bar.appendChild(northBtn);
+
+            bar.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
+
+            // Biggest available speed lever on a large dataset: filtered-out
+            // wells are usually the majority and are only drawn as grey dots.
+            // Taking them off the map entirely cuts the marker count outright.
+            const hideFilteredBtn = document.createElement('button');
+            hideFilteredBtn.textContent = 'Hide Filtered';
+            hideFilteredBtn.title = 'Remove filtered-out (grey) wells from the map. Big speed-up on large datasets.';
+            hideFilteredBtn.addEventListener('click', () => {
+                hideFilteredWells = !hideFilteredWells;
+                hideFilteredBtn.classList.toggle('active', hideFilteredWells);
+                applyFilteredWellVisibility();
+            });
+            bar.appendChild(hideFilteredBtn);
 
             bar.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
 
@@ -2759,6 +2864,24 @@
                 bar.addEventListener(t, e => e.stopPropagation()));
 
             map.controls[google.maps.ControlPosition.TOP_LEFT].push(bar);
+        }
+
+        // Detach or reattach the grey, filtered-out well markers.
+        let hideFilteredWells = false;
+        function applyFilteredWellVisibility() {
+            if (!wellMarkers || !wellMarkers.length) return;
+            const filteredKeys = new Set(filteredWellData.map(w => getWellKey(w)));
+            let hidden = 0;
+            wellMarkers.forEach(({ marker, data }) => {
+                const isFiltered = !filteredKeys.has(getWellKey(data));
+                if (!isFiltered) return;
+                const target = hideFilteredWells ? null : map;
+                if (marker.getMap() !== target) marker.setMap(target);
+                hidden++;
+            });
+            flashMapHint(hideFilteredWells
+                ? `Hid ${formatNumber(hidden)} filtered-out wells.`
+                : `Showing all wells again.`);
         }
 
         // Brief non-blocking hint inside the map area.
@@ -2911,7 +3034,8 @@
 
             try {
                 if (!maps3dLib) maps3dLib = await google.maps.importLibrary('maps3d');
-                const { Map3DElement, Marker3DElement, Polygon3DElement, MapMode } = maps3dLib;
+                const { Map3DElement, Marker3DElement, Marker3DInteractiveElement,
+                        Polygon3DElement, PopoverElement, MapMode } = maps3dLib;
 
                 if (!map3d) {
                     map3d = new Map3DElement({
@@ -2930,7 +3054,8 @@
                 }
 
                 // Rebuild the scene for the current data.
-                populate3DScene(Marker3DElement, Polygon3DElement);
+                populate3DScene(Marker3DElement, Marker3DInteractiveElement,
+                                PopoverElement, Polygon3DElement);
 
                 // Fly in rather than snapping, which reads much better.
                 if (typeof map3d.flyCameraTo === 'function') {
@@ -2958,11 +3083,57 @@
         }
 
         // Re-create the analysis overlays as 3D elements.
-        function populate3DScene(Marker3DElement, Polygon3DElement) {
+        //
+        // v2.2: markers are now Marker3DInteractiveElement with a PopoverElement
+        // each, so clicking a pin shows its spill data. Plain Marker3DElement --
+        // what v2.1 used -- is deliberately non-interactive and fires no events,
+        // which is why hovering a pin showed nothing at all.
+        //
+        // Note this is CLICK, not hover: 3D markers are drawn by the WebGL
+        // renderer rather than as DOM boxes, so there are no CSS hover targets
+        // to hang a tooltip on. gmp-click is the interaction the API exposes.
+        function populate3DScene(Marker3DElement, Marker3DInteractiveElement,
+                                 PopoverElement, Polygon3DElement) {
             if (!map3d) return;
 
             // Clear whatever the previous open left behind.
             Array.from(map3d.children).forEach(c => c.remove());
+
+            const canInteract = typeof Marker3DInteractiveElement === 'function'
+                             && typeof PopoverElement === 'function';
+            if (!canInteract) {
+                console.warn('3D: interactive markers unavailable in this API version; '
+                           + 'falling back to static pins without popovers.');
+            }
+
+            // Build one interactive pin + popover pair.
+            const addPin = (opts, popoverHtml) => {
+                if (!canInteract) {
+                    map3d.append(new Marker3DElement(opts));
+                    return;
+                }
+                const pin = new Marker3DInteractiveElement(opts);
+                // The popover is built on first click rather than up front --
+                // creating one per pin doubled the element count in the scene
+                // for content that is almost never all needed at once.
+                let pop = null;
+                pin.addEventListener('gmp-click', () => {
+                    if (!pop) {
+                        pop = new PopoverElement({ open: false, positionAnchor: pin });
+                        const box = document.createElement('div');
+                        box.className = 'map3d-popover';
+                        box.innerHTML = popoverHtml;
+                        pop.append(box);
+                        map3d.append(pop);
+                    }
+                    // Close any other popover so only one is open at a time.
+                    Array.from(map3d.children).forEach(c => {
+                        if (c !== pop && c.tagName && /POPOVER/i.test(c.tagName)) c.open = false;
+                    });
+                    pop.open = !pop.open;
+                });
+                map3d.append(pin);
+            };
 
             // Facility service-radius rings, as ground-clamped polygons.
             if (Polygon3DElement) {
@@ -2981,24 +3152,35 @@
 
             // Facilities, raised and extruded so they read against terrain.
             facilities.forEach(f => {
-                const m = new Marker3DElement({
+                addPin({
                     position: { lat: f.lat, lng: f.lng, altitude: 220 },
                     altitudeMode: 'RELATIVE_TO_GROUND',
                     extruded: true,
                     label: 'Facility ' + f.id
-                });
-                map3d.append(m);
+                }, `
+                    <div style="font-weight:700;color:${f.color};margin-bottom:4px;">Facility ${f.id}</div>
+                    <div><strong>Service radius:</strong> ${Number(f.serviceRadius).toFixed(1)} mi</div>
+                    <div><strong>Wells served:</strong> ${formatNumber((f.wells || []).length)}</div>
+                    <div><strong>Captured volume:</strong> ${formatNumber(f.capturedVolume || 0, 2)} CY</div>
+                    <div><strong>Location:</strong> ${f.lat.toFixed(4)}, ${f.lng.toFixed(4)}</div>
+                `);
             });
 
             // Landfills
             landfills.forEach(lf => {
-                const m = new Marker3DElement({
+                const sel = selectedLandfills.has(landfills.indexOf(lf));
+                addPin({
                     position: { lat: lf.lat, lng: lf.lng, altitude: 140 },
                     altitudeMode: 'RELATIVE_TO_GROUND',
                     extruded: true,
                     label: formatLandfillName(lf.site)
-                });
-                map3d.append(m);
+                }, `
+                    <div style="font-weight:700;color:#ff6b35;margin-bottom:4px;">${formatLandfillName(lf.site)}</div>
+                    <div><strong>Operator:</strong> ${lf.company || 'N/A'}</div>
+                    <div><strong>Max radius:</strong> ${lf.maxRadius || 'N/A'} mi</div>
+                    <div><strong>Location:</strong> ${lf.lat.toFixed(4)}, ${lf.lng.toFixed(4)}</div>
+                    <div style="margin-top:4px;opacity:.8;">${sel ? '✓ Selected' : 'Not selected'}</div>
+                `);
             });
 
             // Wells, capped -- 3D markers are much heavier than 2D symbol dots.
@@ -3008,16 +3190,32 @@
             let shown = 0;
             for (let i = 0; i < wells.length; i += step) {
                 const w = wells[i];
-                map3d.append(new Marker3DElement({
+                const dates = (w.firstDate && w.lastDate)
+                    ? `<div><strong>Dates:</strong> ${w.firstDate.toLocaleDateString()} – ${w.lastDate.toLocaleDateString()}</div>`
+                    : '';
+                addPin({
                     position: { lat: Number(w.lat), lng: Number(w.lng) },
-                    altitudeMode: 'CLAMP_TO_GROUND'
-                }));
+                    altitudeMode: 'CLAMP_TO_GROUND',
+                    label: String(w.api || '')
+                }, `
+                    <div style="font-weight:700;color:#4a9eff;margin-bottom:4px;">Well ${w.api || ''}</div>
+                    <div><strong>Lease:</strong> ${w.lease || 'N/A'}</div>
+                    <div><strong>Operator:</strong> ${w.generator || 'N/A'}</div>
+                    <div><strong>Transporter:</strong> ${w.transporter || 'N/A'}</div>
+                    ${dates}
+                    <div><strong>Volume:</strong> ${formatNumber(w.quantity, 2)} CY</div>
+                    <div><strong>Loads:</strong> ${formatNumber(w.loadCount || 0)}</div>
+                    <div><strong>Destination:</strong> ${w.destSite || 'N/A'}</div>
+                    <div><strong>Location:</strong> ${Number(w.lat).toFixed(4)}, ${Number(w.lng).toFixed(4)}</div>
+                `);
                 shown++;
             }
             if (step > 1) {
                 console.log(`3D view: showing ${shown} of ${wells.length} wells (every ${step}th, capped at ${MAX_3D_WELLS}).`);
                 flashMapHint(`3D view is showing ${shown} of ${wells.length} wells for performance.`);
             }
+            console.log(`3D view: ${shown} well pins, ${facilities.length} facilities, ${landfills.length} landfills`
+                        + (canInteract ? ' (click a pin for details)' : ' (non-interactive fallback)'));
         }
 
         // Approximate a geodesic circle as a polygon ring.
@@ -4855,13 +5053,9 @@
 
         // Clear all map markers
         function clearMapMarkers() {
-            wellMarkers.forEach(({ marker, tooltip }) => {
-                removeOverlay(marker);
-                if (tooltip && tooltip.parentNode) {
-                    tooltip.parentNode.removeChild(tooltip);
-                }
-            });
+            wellMarkers.forEach(({ marker }) => removeOverlay(marker));
             wellMarkers = [];
+            hideWellTooltip();   // one shared element now; nothing per-well to free
         }
 
         // Reset app to allow loading a new file
@@ -5555,15 +5749,28 @@
 
         // Helper function to generate consistent well identification key
         // Uses GPS coordinates + destination + generator + transporter
+        // v2.2 perf: getWellKey was being called tens of thousands of times per
+        // interaction (every Set rebuild plus every lookup), each doing two
+        // toFixed(4) calls and a string concat. The key is derived from fields
+        // that never change after load, so it is memoised. A WeakMap is used
+        // rather than a property on the well so nothing leaks into the Excel
+        // and JSON exports, and entries are collected when data is replaced.
+        const _wellKeyCache = new WeakMap();
         function getWellKey(well) {
+            const hit = _wellKeyCache.get(well);
+            if (hit !== undefined) return hit;
+            let key;
             // Handle missing or invalid coordinates (including zeros)
             if (!well.lat || !well.lng || isNaN(well.lat) || isNaN(well.lng) || 
                 Math.abs(well.lat) < 0.0001 || Math.abs(well.lng) < 0.0001) {
-                return `GPS:INVALID-${well.destSite}-${well.generator}-${well.transporter}`;
+                key = `GPS:INVALID-${well.destSite}-${well.generator}-${well.transporter}`;
+            } else {
+                const latKey = well.lat.toFixed(4);
+                const lngKey = well.lng.toFixed(4);
+                key = `GPS:${latKey},${lngKey}-${well.destSite}-${well.generator}-${well.transporter}`;
             }
-            const latKey = well.lat.toFixed(4);
-            const lngKey = well.lng.toFixed(4);
-            return `GPS:${latKey},${lngKey}-${well.destSite}-${well.generator}-${well.transporter}`;
+            if (well && typeof well === 'object') _wellKeyCache.set(well, key);
+            return key;
         }
 
         // Add well markers to map
@@ -5612,44 +5819,25 @@
                     ${viewLinks(well.lat, well.lng, 'API ' + well.api)}
                 `);
                 
-                // Create tooltip div for hover
-                const tooltipDiv = document.createElement('div');
-                tooltipDiv.className = 'gmap-tooltip well-tooltip';
-                tooltipDiv.innerHTML = `
-                    <div style="font-weight: 600; margin-bottom: 4px; color: ${isFiltered ? '#ff6b6b' : '#4a9eff'};">
-                        ${isFiltered ? '⚠ FILTERED OUT' : '✓ ACTIVE'}
-                    </div>
-                    <div><strong>API:</strong> ${well.api}</div>
-                    <div><strong>Lease:</strong> ${well.lease}</div>
-                    <div><strong>Operator:</strong> ${well.generator}</div>
-                    <div><strong>Volume:</strong> ${formatNumber(well.quantity, 2)} CY</div>
-                `;
-                document.body.appendChild(tooltipDiv);
-                
-                // Hover events. e.domEvent is the underlying pointer event, so
-                // the tooltip follows the cursor directly rather than being
-                // projected from a lat/lng as it was under Leaflet.
-                const placeTip = function (e) {
-                    const de = e && e.domEvent;
-                    if (!de) return;
-                    tooltipDiv.style.left = (de.clientX + 15) + 'px';
-                    tooltipDiv.style.top = (de.clientY - 10) + 'px';
-                };
+                // v2.2 perf: this used to build a tooltip <div> per well and
+                // append it to document.body -- about ten DOM nodes each, so a
+                // 5,000-well dataset parked 50,000 permanent nodes in the
+                // document. Every style recalculation had to walk them. There
+                // is now ONE shared tooltip, filled in on hover.
                 marker.addListener('mouseover', function (e) {
-                    placeTip(e);
-                    tooltipDiv.style.display = 'block';
+                    showWellTooltip(well, isFiltered, e);
                 });
-                marker.addListener('mouseout', function () {
-                    tooltipDiv.style.display = 'none';
-                });
-                marker.addListener('mousemove', placeTip);
+                marker.addListener('mouseout', hideWellTooltip);
+                marker.addListener('mousemove', function (e) { moveWellTooltip(e); });
 
                 marker.setMap(map);
-                wellMarkers.push({ marker, data: well, tooltip: tooltipDiv });
+                wellMarkers.push({ marker, data: well, tooltip: null });
                 markersAdded++;
             });
             
             console.log(`Added ${markersAdded} markers to map (${markersSkipped} skipped due to invalid coordinates)`);
+            // Respect the Hide Filtered toggle across data reloads.
+            if (hideFilteredWells) applyFilteredWellVisibility();
         }
 
         // Add landfill markers to map
@@ -5740,6 +5928,9 @@
                 return;
             }
 
+            // Built once and shared by every selected landfill below.
+            const filteredKeysAll = new Set(filteredWellData.map(w => getWellKey(w)));
+
             // Draw circles and find wells in range (using per-landfill radii)
             let wellsInRange = new Set();
             let totalVolume = 0;
@@ -5829,8 +6020,11 @@
                     updateYellowDotsAndStats();
                 });
 
-                // Create Set of filtered well keys for checking
-                const filteredKeys = new Set(filteredWellData.map(w => getWellKey(w)));
+                // v2.2 perf: this Set used to be rebuilt inside the
+                // per-landfill loop, so it was recomputed once per selected
+                // landfill over the whole well list. It is now built once above
+                // as filteredKeysAll.
+                const filteredKeys = filteredKeysAll;
                 
                 // Find wells in range that SENT SOIL TO THIS LANDFILL
                 wellMarkers.forEach(({ marker, data }, wellIndex) => {
