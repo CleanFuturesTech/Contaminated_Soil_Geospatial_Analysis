@@ -6426,6 +6426,16 @@ function updateCombinedResults() {
             
             // Show loading indicator
             addLoadingMessage();
+
+            // Declared outside the try so the catch block can name it in errors.
+            const WORKER_URL = 'https://anthropic-proxy.greg-eaf.workers.dev/';
+
+            // Model IDs are retired over time, and when one is the API replies with
+            // a terse `model: <id>` error that looks like a bug in this page. It is
+            // not - it just means the ID no longer exists. Current IDs are listed at
+            // https://platform.claude.com/docs/en/models/overview
+            // (claude-sonnet-4-20250514 was retired; replaced 2026-08-28.)
+            const AI_MODEL = 'claude-sonnet-5';
             
             try {
                 // Get API key
@@ -6446,8 +6456,6 @@ function updateCombinedResults() {
                     content: `${question}\n\nData Context:\n${dataContext}`
                 });
                 
-                // Call Claude API through Cloudflare Worker proxy
-                const WORKER_URL = 'https://anthropic-proxy.greg-eaf.workers.dev/';
                 
                 const response = await fetch(WORKER_URL, {
                     method: 'POST',
@@ -6456,16 +6464,24 @@ function updateCombinedResults() {
                     },
                     body: JSON.stringify({
                         apiKey: apiKey,
-                        model: 'claude-sonnet-4-20250514',
+                        model: AI_MODEL,
                         max_tokens: 4096,
                         messages: conversationHistory
                     })
                 });
                 
-                // Check response status
+                // Check response status. The body may not be JSON (a proxy error
+                // page, an HTML 502), so read it as text first and only then try
+                // to parse - otherwise the real status is masked by a JSON error.
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error?.message || `API returned status ${response.status}`);
+                    const bodyText = await response.text();
+                    let msg;
+                    try {
+                        msg = JSON.parse(bodyText)?.error?.message;
+                    } catch {
+                        msg = bodyText.slice(0, 200);
+                    }
+                    throw new Error(msg || `Proxy returned status ${response.status}`);
                 }
                 
                 const data = await response.json();
@@ -6507,7 +6523,23 @@ function updateCombinedResults() {
             } catch (error) {
                 console.error('AI Assistant Error:', error);
                 removeLoadingMessage();
-                addMessageToChat('assistant', 'Sorry, I encountered an error: ' + error.message);
+                // A TypeError from fetch() means the request never completed: the
+                // browser blocked it or the host was unreachable. That is a very
+                // different problem from an API error, and "Failed to fetch" on its
+                // own sends you looking in the wrong place - so name the likely cause.
+                const networkFailure = (error instanceof TypeError) ||
+                                       /failed to fetch|load failed|networkerror/i.test(error.message || '');
+                if (networkFailure) {
+                    addMessageToChat('assistant',
+                        'Could not reach the analysis proxy at ' + WORKER_URL + '.\n\n' +
+                        'The request never left the browser, so this is not a problem with your ' +
+                        'question or your API key. The usual cause is the proxy not answering the ' +
+                        'CORS preflight (an OPTIONS request) — check the Network tab for a failed ' +
+                        'OPTIONS row, and the Console for a message mentioning "preflight".\n\n' +
+                        'Other possibilities: the Worker is down, or the browser is offline.');
+                } else {
+                    addMessageToChat('assistant', 'Sorry, I encountered an error: ' + error.message);
+                }
             } finally {
                 sendBtn.disabled = false;
             }
