@@ -2613,8 +2613,15 @@
                         date: parsedDate,
                         quantity: parseFloat(row['Quantity']) || 0,
                         county: row['County'] || '',
-                        generator: row['Generator'] || '',
-                        transporter: row['Transporter'] || ''
+                        // Blank generator/transporter must become a real, visible
+                        // value. The selector sets are built with `if (row.generator)`,
+                        // so an empty string never joins them - and the filter below
+                        // then asks `selectedGenerators.has('')`, which is false, and
+                        // drops the row with no log line and no way to switch it off.
+                        // A named placeholder puts those loads in the picker where
+                        // they can be seen and deliberately excluded.
+                        generator: (row['Generator'] || '').trim() || '(Not specified)',
+                        transporter: (row['Transporter'] || '').trim() || '(Not specified)'
                     };
                     
                     // DEBUG: Log first row to verify types
