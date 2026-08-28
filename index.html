@@ -6436,6 +6436,16 @@ function updateCombinedResults() {
             // https://platform.claude.com/docs/en/models/overview
             // (claude-sonnet-4-20250514 was retired; replaced 2026-08-28.)
             const AI_MODEL = 'claude-sonnet-5';
+
+            // The Messages API requires strictly alternating roles, and every
+            // tool_use block must be answered by a matching tool_result. A network
+            // error mid-loop, or hitting the turn cap, would otherwise leave the
+            // history ending on an unanswered assistant tool_use or on two
+            // consecutive user turns, and every later question in the session would
+            // fail with a confusing API error. Snapshot before the turn; roll back
+            // if it does not complete. Declared out here so the catch block can
+            // reach it.
+            const historyBeforeTurn = conversationHistory.slice();
             
             try {
                 // Get API key
@@ -6447,81 +6457,116 @@ function updateCombinedResults() {
                     return;
                 }
                 
-                // Prepare data context
-                const dataContext = prepareDataContext(question);
-                
-                // Add to conversation history
-                conversationHistory.push({
-                    role: 'user',
-                    content: `${question}\n\nData Context:\n${dataContext}`
-                });
-                
-                
-                const response = await fetch(WORKER_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        apiKey: apiKey,
-                        model: AI_MODEL,
-                        max_tokens: 4096,
-                        messages: conversationHistory
-                    })
-                });
-                
-                // Check response status. The body may not be JSON (a proxy error
-                // page, an HTML 502), so read it as text first and only then try
-                // to parse - otherwise the real status is masked by a JSON error.
-                if (!response.ok) {
-                    const bodyText = await response.text();
-                    let msg;
-                    try {
-                        msg = JSON.parse(bodyText)?.error?.message;
-                    } catch {
-                        msg = bodyText.slice(0, 200);
-                    }
-                    throw new Error(msg || `Proxy returned status ${response.status}`);
-                }
-                
-                const data = await response.json();
-                
-                // Remove loading message
-                removeLoadingMessage();
-                
-                // Check for API errors
-                if (data.error) {
-                    let errorMsg = 'API Error: ';
-                    if (data.error.type === 'authentication_error') {
-                        errorMsg += 'Invalid API key. Please check your API key and try again.';
-                    } else if (data.error.type === 'rate_limit_error') {
-                        errorMsg += 'Rate limit exceeded. Please wait a moment and try again.';
-                    } else {
-                        errorMsg += data.error.message || 'Unknown error';
-                    }
-                    addMessageToChat('assistant', errorMsg);
-                    sendBtn.disabled = false;
-                    return;
-                }
-                
-                // Process response
-                if (data.content && data.content.length > 0) {
-                    const assistantMessage = data.content[0].text;
-                    
-                    // Add to conversation history
-                    conversationHistory.push({
-                        role: 'assistant',
-                        content: assistantMessage
+                // The assistant now calls tools instead of being handed a
+                // pre-chosen summary, so only the question goes into the history.
+                // Previously the whole data blob was pushed in on every turn, which
+                // meant the same summary was re-sent with each follow-up and the
+                // context grew without bound.
+                // The Messages API requires strictly alternating roles, and every
+                // tool_use block must be answered by a matching tool_result. A
+                // network error mid-loop, or hitting the turn cap, would otherwise
+                // leave history ending on an unanswered assistant tool_use or on
+                // two consecutive user turns — and every later question in the
+                // session would then fail with a confusing API error. So: snapshot
+                // before the turn, and roll back if the turn does not complete.
+                conversationHistory.push({ role: 'user', content: question });
+
+                // Agentic loop: the model may ask for data before it can answer.
+                // Each pass either returns a final answer or a set of tool calls to
+                // run locally and hand back. The cap stops a malformed loop running
+                // away with the user's credit.
+                const MAX_TOOL_TURNS = 6;
+                let finalText = null;
+
+                for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+                    const response = await fetch(WORKER_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            apiKey: apiKey,
+                            model: AI_MODEL,
+                            max_tokens: 4096,
+                            system: aiSystemPrompt(),
+                            tools: AI_TOOLS,
+                            messages: conversationHistory
+                        })
                     });
-                    
-                    // Parse and display response
-                    displayAIResponse(assistantMessage);
+
+                    if (!response.ok) {
+                        const bodyText = await response.text();
+                        let msg;
+                        try { msg = JSON.parse(bodyText)?.error?.message; }
+                        catch { msg = bodyText.slice(0, 200); }
+                        throw new Error(msg || `Proxy returned status ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    if (data.error) {
+                        let errorMsg = 'API Error: ';
+                        if (data.error.type === 'authentication_error') {
+                            errorMsg += 'Invalid API key. Please check your API key and try again.';
+                        } else if (data.error.type === 'rate_limit_error') {
+                            errorMsg += 'Rate limit exceeded. Please wait a moment and try again.';
+                        } else {
+                            errorMsg += data.error.message || 'Unknown error';
+                        }
+                        conversationHistory = historyBeforeTurn;
+                        removeLoadingMessage();
+                        addMessageToChat('assistant', errorMsg);
+                        sendBtn.disabled = false;
+                        return;
+                    }
+
+                    // Keep the assistant turn verbatim — tool_use blocks must come
+                    // back exactly as sent or the tool_result ids will not match.
+                    conversationHistory.push({ role: 'assistant', content: data.content });
+
+                    if (data.stop_reason === 'tool_use') {
+                        const calls = (data.content || []).filter(c => c.type === 'tool_use');
+                        const results = calls.map(call => {
+                            let payload;
+                            try {
+                                payload = runAiTool(call.name, call.input || {});
+                                console.log('AI tool', call.name, call.input, '->',
+                                            payload.totalLoads ?? payload.returned ?? '');
+                            } catch (err) {
+                                payload = { error: String(err && err.message || err) };
+                                console.warn('AI tool failed', call.name, err);
+                            }
+                            return {
+                                type: 'tool_result',
+                                tool_use_id: call.id,
+                                content: JSON.stringify(payload)
+                            };
+                        });
+                        conversationHistory.push({ role: 'user', content: results });
+                        continue;   // let the model use what it just asked for
+                    }
+
+                    finalText = (data.content || [])
+                        .filter(c => c.type === 'text')
+                        .map(c => c.text)
+                        .join('\n')
+                        .trim();
+                    break;
+                }
+
+                removeLoadingMessage();
+
+                if (finalText) {
+                    displayAIResponse(finalText);
                 } else {
-                    addMessageToChat('assistant', 'Sorry, I encountered an error processing your request.');
+                    // Incomplete: discard this turn so the next question starts clean.
+                    conversationHistory = historyBeforeTurn;
+                    addMessageToChat('assistant',
+                        'I stopped after ' + MAX_TOOL_TURNS + ' rounds of looking things up ' +
+                        'without reaching an answer. Try narrowing the question.');
                 }
                 
             } catch (error) {
                 console.error('AI Assistant Error:', error);
+                // Leave no half-finished turn behind — see the snapshot note above.
+                conversationHistory = historyBeforeTurn;
                 removeLoadingMessage();
                 // A TypeError from fetch() means the request never completed: the
                 // browser blocked it or the host was unreachable. That is a very
@@ -6935,6 +6980,567 @@ function updateCombinedResults() {
 
         // Prepare data context for Claude
         // Prepare data context for Claude (using pre-aggregated analytics)
+
+        // =====================================================================
+        // AI ASSISTANT — knowledge base, tools, and the agentic loop
+        //
+        // The assistant used to receive a pre-computed summary chosen by keyword
+        // matching on the question. That could only answer questions someone had
+        // anticipated, and it knew nothing about how the data was derived, so it
+        // had no way to caveat a number or decline a question it could not reach.
+        //
+        // Now it gets two things instead: a knowledge base describing the dataset
+        // and its limits, and tools it can call to query the loaded rows directly.
+        // =====================================================================
+
+        // Curated from the project record. Deliberately NOT a dump of the working
+        // notes — those are versioned session logs where later work corrects
+        // earlier work, and shipping them whole would have the assistant asserting
+        // things since disproved. Superseded beliefs are recorded as corrections.
+        //
+        // ~5,300 tokens, so it is sent whole rather than retrieved. If it grows
+        // past roughly 20,000 tokens, add a search_knowledge tool and serve it
+        // from a separate file instead.
+        const AI_KNOWLEDGE = `### What this dataset is  [dataset-overview]
+Row-per-truckload records of CONTAMINATED SOIL delivered to commercial oilfield waste
+facilities in the Permian Basin (west Texas and south-east New Mexico).
+
+Scale: 214,934 loads, 3,526,887 cubic yards, spanning 2021-01 to 2026-06, across 14
+permitted facilities.
+
+Source: the operators' own quarterly reports filed with the Railroad Commission of Texas
+(RRC). Not a database extract - these are the filings as submitted, read back into
+structured form. Two retrieval routes: the ORR 26-1801 open-records production, and the
+RRC's public Neubus repository.
+
+Scope note: contaminated soil ONLY. Drill cuttings, drilling mud, tank bottoms, produced
+water and other streams are excluded from every figure. The full multi-stream archive is
+1,132,851 loads, but this dataset is the soil subset.
+
+### The 14 facilities  [facilities]
+Destination sites, in the EA naming convention (Destination Company | Destination Site),
+with approximate soil volume over the full 2021-2026 span:
+
+R360 | RED BLUFF, REPUBLIC | SOUTH ODESSA, WM | HOWARD, REPUBLIC | REEVES,
+R360 | WISHBONE, WM | BIG LAKE, MILESTONE | UPTON, MILESTONE | ORLA EWF,
+WM | DEEP SIX, WM | ORLA LANDFILL, DESERT ENVIRONMENTAL | DRF MENTONE,
+MILESTONE | GLASSCOCK, US ECOLOGY | PECOS, US ECOLOGY | REAGAN.
+
+A fifteenth site, MILESTONE | STANTON LANDFILL, appears in the EnviroAnalytics data but
+NOT in this dataset - see the stanton-landfill entry.
+
+### Barrels to cubic yards  [units-barrels]
+Barrels are converted to cubic yards at 4.808 bbl/CY.
+
+This is exact geometry, not an assumption: 42 US gallons = 5.6146 cubic feet, and
+27 / 5.6146 = 4.8089.
+
+Roughly 61,000 loads were filed in barrels and converted this way. The per-load Notes
+field records the as-filed barrel figure alongside the converted value.
+
+### Tons to cubic yards is an ASSUMPTION, not a conversion  [units-tons]
+Tons are carried to cubic yards at 1 ton = 1 CY.
+
+This is a DENSITY ASSUMPTION and it is almost certainly generous. Real excavated soil
+runs roughly 1.2 t/CY loose to 1.4 t/CY compacted, so 1:1 OVERSTATES volume for those
+loads - by up to about 40% on the affected rows.
+
+It is held at 1:1 by explicit direction, because true density depends on soil type and
+moisture content and the manifests record neither. Roughly 1,300 loads are affected and
+each carries \`volume_from_tons\` in its Notes.
+
+Never present a tons-derived figure as precise. If a question turns on those loads, say
+the assumption is in play.
+
+### Loads with no volume - why counts and CY move independently  [zero-volume]
+5,943 loads carry NO volume at all. The manifest recorded the truckload but left the
+quantity blank. The load is counted; the volume is left empty rather than estimated.
+
+Consequence: load counts and cubic yards do not move together. A month can gain loads
+without gaining CY. Any answer comparing the two must say which it is using.
+
+The map tool goes further and discards these rows entirely - see tool-filter-semantics.
+
+### How a load gets its coordinates  [origin-ladder]
+Six rungs, tried in order, first match wins. The rung reached is written to each load as
+\`location_source\` and stated in its Notes.
+
+1. Operator-printed lat/long on the manifest - 9,477 loads
+2. API number in its own column, resolved against the RRC well master - 85,957
+3. API found inside free text, same lookup - 35,002
+4. Lease/well name matched to the well master - 39,957
+5. Centre of the stated origin county - 35,999
+6. Receiving facility coordinates, no origin at all - 1,674
+
+Plus 6,868 loads labelled \`not_a_wellsite\` - see not-a-wellsite.
+
+About 60% of loads are placed from an API number, which is an unambiguous well identifier
+and needs no inference.
+
+### How lease text is matched to a wellsite  [origin-text-matcher]
+For loads with no API, the origin arrives as one mashed field: lease name, well number and
+operator run together, e.g. \`RHAEGAL UNIT 2 4665DH XTO ENERGY INC\`.
+
+The matcher: strips embedded API digits; refuses non-wells (P-5 operator numbers, STF
+permits, pipelines/batteries); tries an RRC lease number if cited; peels the operator off
+the tail using the generator column as the anchor; then probes the well master from the
+longest stem down through shorter prefixes.
+
+Candidates are accepted on the strongest evidence available, in order: well number match,
+then generator matching the well operator, then exact stem plus county, then token overlap
+(which requires operator agreement, or it degenerates into matching any shared word).
+
+Two guardrails:
+- County is a PROXIMITY test, not equality - within 75 miles of the stated county centroid,
+  or in that county outright. Crossing a county line additionally requires operator
+  agreement, because name-alone across county lines measured 0% within 5 miles.
+- If matched wells scatter more than 12 miles, the matcher returns nothing and the load
+  falls to a county centroid. A confident wrong pin is worse than an honest centroid.
+
+### What the confidence number means  [origin-confidence]
+The confidence on a name-matched load measures the SPREAD of the candidate cluster - how
+tightly the candidate wells agreed. It is a precision figure, not a probability that the
+right lease was found.
+
+Measured by a blind hold-out test (loads that had an API had it hidden, were re-resolved
+from text alone, and the answer compared to the true well):
+
+  spread 0-0.5 mi  -> 0.95 : 100% within 0.5 mi, median error 0.00 mi
+  spread 0.5-2 mi  -> 0.92 :  92% within 1 mi,   median error 0.29 mi
+  spread 2-5 mi    -> 0.72 :  97% within 2 mi,   median error 1.52 mi
+  county centroid on the same loads: median error 28.2 mi
+
+Recall on that ground-truth set was 91.9%.
+
+Practical guidance: filter on \`location_source\`, which says what KIND of evidence exists.
+Do not filter on the confidence number - a 0.72 load is within two miles of truth 97% of
+the time, and dropping everything under 0.9 discards ~8,600 well-placed loads for nothing.
+
+### The origin audit - what was verified  [origin-audit]
+Origins were tested against evidence the matcher never used: the county stated on the
+manifest, the haul distance to the receiving facility, and - for API-resolved loads - the
+county code embedded in the API number itself (a Texas API reads 42-CCC-NNNNN).
+
+Of 158,265 independently testable loads, 152,146 (96.1%) were corroborated.
+
+Of the 6,119 disagreements, the 4,722 on API-resolved loads could be adjudicated by the
+API prefix. ALL 4,722 went against the manifest: the API prefix backed the well master
+every single time. Zero bad lookups, zero undecidable.
+
+Haul distances are tight and support this: median 15 mi for API-resolved loads, 17 mi for
+name-matched, p95 under 40 mi. Bad matches announce themselves as impossible truck
+journeys, and there is no such cluster.
+
+### The manifest county field is the weakest field  [manifest-county-unreliable]
+The county written on a manifest is the GENERATOR's stated county, and it is wrong often
+enough that it must not be used to validate or correct a resolved position.
+
+Every adjudicable conflict resolved against it - 4,722 out of 4,722.
+
+Worked example: 1,302 loads of XTO's HILL UNIT are booked to REAGAN county. The only XTO
+Hill Unit in the RRC well master is in MARTIN county, the well numbers match that unit's
+series, and the haul to the receiving facility is 14 miles rather than the ~70 a Reagan
+origin would imply. The operator keyed the wrong county; the match is right.
+
+Where a resolved origin and the stated county disagree, trust the resolved origin.
+
+### County-centroid loads carry +/-16 miles  [county-centroid-uncertainty]
+35,999 loads (about 17%) are placed at the centre of their stated county because the
+manifest carried no usable wellsite identifier.
+
+Measured displacement, weighted by loads, is 16.1 miles - computed against the wells
+actually inside each county, not asserted. It varies: Martin, Midland and Loving run
+11-12 miles; Reeves 24; Eddy 26; Lea 27; Pecos 32.
+
+Fine for county or basin-scale aggregation and for density mapping. NOT suitable for
+anything reasoning about a specific location - proximity to a receptor, a watershed
+boundary, a parcel line. These points look exactly as confident as survey-grade wellsites
+on a map and are not.
+
+### Operator-printed coordinates are plausible but unaudited  [operator-coordinates-unaudited]
+9,477 loads sit at the top of the location ladder on coordinates the operator typed onto
+the manifest, carrying confidence 1.00.
+
+That ranking is reasonable but essentially UNVERIFIED: only 16 of those loads also carry
+an API number, so there is almost nothing to check the other 9,461 against. Of the 16, ten
+land within half a mile of the API well and one is 79 miles out.
+
+A coarser test - does the printed point fall in the county the operator also stated -
+passes for 92%. Most apparent failures are not failures: 379 loads from Lea County, New
+Mexico sit 49 miles from Lea's centre and inside Lea County, which is simply enormous.
+
+Treat this rung as plausible, small (4.4% of loads), and not independently confirmed.
+
+### Loads deliberately not matched to a well  [not-a-wellsite]
+6,868 loads are labelled \`not_a_wellsite\` rather than forced onto a coordinate. The
+manifest names something real that is not a wellbore:
+
+- P-5 numbers (e.g. \`P5#681040\`) identify an OPERATOR
+- STF permits (e.g. \`STF-0165\`) identify a waste FACILITY
+- pipelines, batteries, plants, terminals and yards are real contamination sources but not
+  wells, and the well master cannot place them
+
+These are not failures and should not be counted as unresolved. They are genuine origins
+whose coordinates this dataset does not know, kept visible instead of buried in the
+county-centroid population where they would look like ordinary imprecision.
+
+### Wishbone Q2 2025 was never filed  [gap-wishbone-q2-2025]
+R360's Wishbone Ranch (STF-0055) Q2 2025 report is titled "April 1 - June 30, 2025", but
+every page of its manifest table carries the running header "JANUARY - MARCH 2025" and the
+load rows are dated January through March. Q1 data was filed a second time under a Q2
+cover. Confirmed by sampling running headers across all 387 pages.
+
+No April-June 2025 manifest exists in the public record. On the site's Q1 and Q3 run rates
+that is roughly 6,000 loads (~100,000 CY) absent.
+
+This gap is invisible to a comparison against the EnviroAnalytics data, because EA is
+missing the same quarter for the same reason. Wishbone's 2025 total is understated by
+about one quarter, and any trend line through mid-2025 at that site is affected.
+
+### DRF Mentone 2024 exists but is not public  [gap-drf-mentone]
+Desert Reclamation LLC's Desert Waste Separation TRD facility (STF-0184, facility ID
+16447) has Neubus records for 2025-2026 ONLY. The RRC's own facility listing records this
+facility's 2022-2024 reports as held on the RRC's internal L: drive.
+
+The filings exist; they are not in the public repository. About 389 loads across five
+months (2024-07, 2024-08, 2025-06, 2025-08, 2025-09) are missing here but present in the
+EA data. A supplemental records request is drafted for these.
+
+This is the only remaining gap where EA has data and this dataset does not for a reason
+that can be fixed by asking.
+
+### Stanton Landfill is outside the request scope  [stanton-landfill]
+MILESTONE | STANTON LANDFILL appears in the EnviroAnalytics data (106 loads, March-June
+2024) but not in this dataset.
+
+It is a real, operating Milestone slurry injection and landfill facility at 512 County
+Road 470, Stanton, Martin County, which Milestone announced received RRC approval for an
+energy waste landfill permit in August 2023. But it is absent from the 41-facility RRC
+listing that scoped the ORR 26-1801 request, absent from the RRC's published Active
+Commercial Surface Waste Disposal Facilities list, and not findable in Neubus under
+Milestone's operator name.
+
+So this is a hole in the REQUEST SCOPE, not a processing failure. Its permit basis needs
+to come from the Commission directly.
+
+### 2024 H1 at the WM sites - closed, and how  [gap-2024-h1-closed]
+An earlier version of this dataset had no January-June 2024 data for Howard, Big Lake,
+Deep Six or Orla Landfill - about 5,500 soil loads missing, which dominated the comparison
+against EA.
+
+Cause: the ORR delivery simply did not include those quarters, and the Neubus year-records
+for 2024 had never been pulled because the delivery appeared to cover the year.
+
+Resolved in August 2026 by retrieving the 2024 year-records directly. Interior holes fell
+from 42 months / 9,626 loads to 6 months / 1,134 loads. The 2024 H1 data is present and
+complete. Do not describe it as missing.
+
+### How the RRC Neubus repository is searched  [retrieval-neubus]
+Neubus (rrcsearch3.neubus.com, profile 79) holds the RRC's scanned and filed quarterly
+reports. Search is URL-driven.
+
+CRITICAL: search by FACILITY ID, not permit number. Permit-number search returns only the
+year-records that carry a permit number, and for most facilities the pre-2024 records have
+that field blank, so they never appear:
+
+    ?profileId=79&search_fields-permit_number=STF-0101  -> 1 record  (2026)
+    ?profileId=79&search_fields-facility_id=8649        -> 6 records (2021-2026)
+
+That single change is what took this dataset from 2024-2025 to 2021-2026. Permit-number
+search is still how you FIND the facility ID - it comes back on the current-year row.
+
+Neubus renames every downloaded file to an opaque hash, so a filename alone will not find a
+document again. The per-load Notes carry the facility ID and the recipe: search on facility
+ID, open the year record, the file is in its Main tab.
+
+### The two retrieval routes and what each gave  [sources]
+ORR 26-1801 delivery: the RRC's response to an open-records request. 2,346 files, 13.7 GB
+across 33 facility folders. Mostly PDF report packets; 83 spreadsheets in the RRC template
+whose \`Incoming\` tab is a row-per-truckload manifest.
+
+RRC Neubus public repository: the same class of filings, retrievable by facility ID. This
+supplied the entire 2021-2023 back catalogue plus quarters the delivery had missed.
+
+A structural limit worth knowing: the RRC's EPS database does NOT collect API numbers,
+generator, transporter, lease names, material, quantity or unit of measure. It holds
+facility name, operator, permit numbers, lat/long, county and permit dates. Everything
+load-level in this dataset comes from reading the operators' filed reports, which is also
+where the EnviroAnalytics data came from.
+
+### How this compares to the EnviroAnalytics dataset  [ea-comparison]
+The EnviroAnalytics ("EA") workbook that previously powered the map covers 2024-01 to
+2025-09 with 83,434 contaminated-soil loads / 1,339,949 CY.
+
+Over that same window this dataset holds more: 2024 is 62,165 loads vs EA's 54,956, and
+2025-through-September is 53,412 vs 28,478. It also extends the record to 2021-2023 and
+into 2026, which EA does not cover at all.
+
+Control check: South Odessa reconciles at 22,611 loads against EA's 22,589 (+0.1%). That
+figure has held through every parser change in the project and is the regression test most
+likely to catch a mis-mapped facility.
+
+One genuine classification difference: at REPUBLIC | REEVES, EA counts drilling mud and
+cuttings as contaminated soil and this dataset does not. That is a definitional
+disagreement, not a gap - proved by matching EA rows to ours on date, generator and
+quantity.
+
+### EA is NOT an independent source  [ea-not-independent]
+Important when reasoning about agreement between the two datasets: EA appears to be
+reading the SAME underlying RRC quarterly reports.
+
+Evidence: across 89 site-quarters, 20 of EA's 21 gaps are WHOLE QUARTERS - all three months
+absent - and only one is ragged. An independent load-level source (hauler feeds, facility
+relationships) would fray at the edges; perfectly quarter-aligned dropouts are the
+signature of ingesting quarterly documents one file at a time.
+
+Consequence: EA agreeing with this dataset is not corroboration by a second witness, and
+EA also missing something is not evidence that it does not exist. Both share the same blind
+spots - Wishbone Q2 2025 being the clearest case.
+
+The corollary is useful though: EA's gaps are quarters where their ingestion failed and
+ours did not - 21,925 loads / 388,627 CY across 20 whole quarters, including Red Bluff
+Q4 2024 alone at 7,206 loads, and all seven quarters of Milestone Glasscock.
+
+One loose thread cutting the other way: EA has Stanton Landfill, which has no RRC filing we
+can find - so EA may have at least one non-RRC source.
+
+### What the map tool silently excludes  [tool-filter-semantics]
+Numbers read off the map are not the same as numbers in the file. The loader applies
+filters in this order, and two of them are invisible:
+
+1. Rows with invalid or missing coordinates are dropped.
+2. Rows with \`quantity <= 0\` are dropped ENTIRELY - the load disappears, not just its
+   volume. This removes the ~5,900 no-volume loads from both counts and totals.
+3. Rows whose generator or transporter is blank were silently dropped, because the
+   "select all" sets were built from truthy values only. FIXED in August 2026 by mapping
+   blanks to a visible "(Not specified)" entry that can be toggled.
+4. If the Permian Basin filter is on, rows outside lat 30.5-33.5 / lng -105 to -100.5 are
+   removed, with a visible count.
+5. The date range filter.
+
+Rows are then aggregated by GPS (4 decimal places) + destination + generator + transporter,
+so one "well" in the tool is a source-destination-hauler combination, not strictly a
+wellbore.
+
+Worked reconciliation for 12/31/2023-6/30/2026 with the Permian filter on: the file holds
+2,129,388 CY; the tool showed 2,116,469 before these fixes; the difference was 5,965
+zero-volume rows plus 5,353 blank-generator rows plus 578 outside the basin.
+
+### Parsing defects found and fixed  [parser-defects]
+Every one of these produced plausible rows with wrong values rather than an error, which
+is why they were found by looking at outputs rather than at logs.
+
+- Petro Waste template (STF-0082/0101/0106/0125): \`Material Description\` matched no header
+  pattern, so its text was absorbed by \`Generator\` and ~45,000 loads carried a blank
+  material. Fixing it recovered 30,000+ contaminated-soil loads previously classified as
+  nothing.
+- Midland SWD (STF-0126): headers ~2 px apart fused into one token, so Material's boundary
+  ran to \`Lease Name\` and swallowed four columns.
+- Deep Six: the template carries both \`Ticket\` and \`Manifest\`; only Ticket was recognised,
+  so manifest numbers landed in the Volume column. One "load" read 844,974,758,120 cu yd.
+  Plausibility caps now reject these.
+- Red Bluff 2023: no Volume header at all - the quantity rides in the Cell column
+  ("S2 100" = cell S2, 100 bbl). 9,333 volumes recovered.
+- Unit confusion: 64,075 loads defaulted to barrels. Correct for Red Bluff and Wishbone
+  (bare numbers ~90), badly wrong for Desert and Mentone (bare ~18, meaning yards). Now
+  resolved per facility from each site's own stated-unit profile.
+- Odessa 2023: two workbooks ship a damaged header row where the generator column is
+  labelled \`Column7\` and the transporter header is whitespace. 3,228 loads had no generator
+  or hauler despite the values sitting in the cells. Fixed by positional backfill.
+- Phantom rows: page 13 of one Big Lake PDF produced 18 "loads" on a single date whose
+  volumes formed an arithmetic ladder stepping -0.8 with -8.0 between groups - page
+  geometry read as quantities. Negative volumes are now refused.
+
+### Beliefs held earlier in this project that are now WRONG  [corrections]
+The project's working notes are versioned session logs, and later work corrected earlier
+work. These earlier conclusions are SUPERSEDED - do not repeat them:
+
+- "The tool may be double-counting because the workbook has two transaction tabs and the
+  loader might read both." FALSE. The loader reads only the single sheet the user selects
+  from a dropdown. Howard was never inflated. Settled by reading the loader source.
+- "DRF Mentone has no load data because it files Form R-2 monthly aggregates." Partly
+  wrong. That is true of facility 16173 (Mentone Rclm, an R9 reclamation plant), but the
+  Desert facility supplying DRF Mentone loads is STF-0184, whose 2022-2024 reports exist
+  on the RRC's L: drive.
+- "The ORR delivery is the dataset." Superseded. The delivery is roughly a third of it;
+  Neubus retrieval by facility ID supplied the rest.
+- "2024 H1 is missing at the WM sites." Fixed - see gap-2024-h1-closed.
+- "The Well Database Master is an EnviroAnalytics deliverable." No - it is Greg's own
+  manual work built in WellDatabase to patch gaps in the EA data. EA supplied only the
+  \`EA *\` columns (API on 33.5% of rows, lat/long on 14.2%).
+
+### What this dataset cannot answer  [limits]
+Be direct about these rather than approximating:
+
+- It covers contaminated soil only. Questions about drill cuttings, mud, produced water or
+  tank bottoms cannot be answered from it.
+- It covers 14 permitted commercial facilities. Waste going anywhere else - including
+  Stanton Landfill - is not here.
+- Where a facility files RRC Form R-2 (monthly aggregates for reclaiming and treating
+  plants), load-level data does not exist in any source. About 20 R9 facilities are in this
+  position.
+- Three facilities filed some quarterly manifests on physical CD; for those facility-years
+  the electronic filing has narrative and inspection forms but no per-load manifest.
+- Volumes for tons-filed loads rest on a density assumption.
+- County-centroid loads cannot support site-specific spatial reasoning.
+- The record ends where operators' filings end. Absence of loads is not evidence of absence
+  of activity - Wishbone Q2 2025 is the proof.`;
+
+        const AI_TOOLS = [
+            {
+                name: 'query_loads',
+                description:
+                    'Query the loaded soil-shipment records. Filters combine with AND. ' +
+                    'Returns total loads, total cubic yards, and optionally a breakdown ' +
+                    'by one field. Use this for any question about quantities, counts, ' +
+                    'rankings, time periods, or geography. Prefer it over estimating.',
+                input_schema: {
+                    type: 'object',
+                    properties: {
+                        destSite:        { type: 'string', description: 'Destination site, e.g. "BIG LAKE". Substring, case-insensitive.' },
+                        excludeDestSite: { type: 'string', description: 'Exclude this destination site. Use for "went somewhere OTHER than X".' },
+                        generator:       { type: 'string', description: 'Generator name, substring match.' },
+                        transporter:     { type: 'string', description: 'Transporter/hauler name, substring match.' },
+                        county:          { type: 'string', description: 'Origin county, substring match.' },
+                        basin:           { type: 'string', description: 'Midland or Delaware.' },
+                        coordSource:     { type: 'string', description: 'How the origin was located: "API Lookup", "GPS on Record", "County Centroid", "Landfill County".' },
+                        dateFrom:        { type: 'string', description: 'Inclusive start date, YYYY-MM-DD.' },
+                        dateTo:          { type: 'string', description: 'Inclusive end date, YYYY-MM-DD.' },
+                        nearLat:         { type: 'number', description: 'Latitude of a point to measure from.' },
+                        nearLng:         { type: 'number', description: 'Longitude of a point to measure from.' },
+                        radiusMiles:     { type: 'number', description: 'Keep only origins within this many miles of nearLat/nearLng.' },
+                        groupBy:         { type: 'string', enum: ['destSite','generator','transporter','county','basin','coordSource','month','year'], description: 'Break the result down by this field.' },
+                        limit:           { type: 'number', description: 'Max groups to return, default 20.' }
+                    }
+                }
+            },
+            {
+                name: 'list_distinct',
+                description:
+                    'List the distinct values of a field with their load and volume ' +
+                    'totals. Use this to find the exact spelling of a site, generator ' +
+                    'or transporter before filtering on it.',
+                input_schema: {
+                    type: 'object',
+                    properties: {
+                        field:    { type: 'string', enum: ['destSite','generator','transporter','county','basin','coordSource'] },
+                        matching: { type: 'string', description: 'Optional substring filter.' },
+                        limit:    { type: 'number', description: 'Default 30.' }
+                    },
+                    required: ['field']
+                }
+            }
+        ];
+
+        function aiToolRows() {
+            // filteredWellData is post date/geography filtering and aggregated;
+            // rawDailyData is every load the file yielded. Tools run over the raw
+            // rows so the assistant can answer outside the current screen filters,
+            // and says so in its answer.
+            return rawDailyData || [];
+        }
+
+        function runAiTool(name, input) {
+            const rows = aiToolRows();
+            if (name === 'list_distinct') {
+                const field = input.field;
+                const match = (input.matching || '').toLowerCase();
+                const agg = new Map();
+                for (const r of rows) {
+                    const v = r[field] == null ? '' : String(r[field]);
+                    if (match && !v.toLowerCase().includes(match)) continue;
+                    const cur = agg.get(v) || { value: v, loads: 0, cy: 0 };
+                    cur.loads += 1; cur.cy += (r.quantity || 0);
+                    agg.set(v, cur);
+                }
+                const out = [...agg.values()].sort((a, b) => b.cy - a.cy)
+                                             .slice(0, input.limit || 30);
+                out.forEach(o => o.cy = Math.round(o.cy));
+                return { field, distinctValues: agg.size, returned: out.length, values: out };
+            }
+
+            if (name === 'query_loads') {
+                const s = v => (v == null ? '' : String(v).toLowerCase());
+                const f = input;
+                const from = f.dateFrom ? new Date(f.dateFrom + 'T00:00:00') : null;
+                const to   = f.dateTo   ? new Date(f.dateTo   + 'T23:59:59') : null;
+                const useRadius = f.nearLat != null && f.nearLng != null && f.radiusMiles != null;
+
+                let loads = 0, cy = 0, noVolume = 0;
+                const groups = new Map();
+                for (const r of rows) {
+                    if (f.destSite        && !s(r.destSite).includes(s(f.destSite))) continue;
+                    if (f.excludeDestSite &&  s(r.destSite).includes(s(f.excludeDestSite))) continue;
+                    if (f.generator       && !s(r.generator).includes(s(f.generator))) continue;
+                    if (f.transporter     && !s(r.transporter).includes(s(f.transporter))) continue;
+                    if (f.county          && !s(r.county).includes(s(f.county))) continue;
+                    if (f.basin           && !s(r.basin).includes(s(f.basin))) continue;
+                    if (f.coordSource     && !s(r.coordSource).includes(s(f.coordSource))) continue;
+                    if (from && !(r.date instanceof Date && r.date >= from)) continue;
+                    if (to   && !(r.date instanceof Date && r.date <= to)) continue;
+                    if (useRadius) {
+                        if (calculateDistance(f.nearLat, f.nearLng, r.lat, r.lng) > f.radiusMiles) continue;
+                    }
+                    loads += 1;
+                    cy += (r.quantity || 0);
+                    if (!r.quantity) noVolume += 1;
+                    if (f.groupBy) {
+                        let k;
+                        if (f.groupBy === 'month')     k = r.date instanceof Date ? r.date.toISOString().slice(0, 7) : 'unknown';
+                        else if (f.groupBy === 'year') k = r.date instanceof Date ? String(r.date.getFullYear()) : 'unknown';
+                        else                           k = r[f.groupBy] == null ? '' : String(r[f.groupBy]);
+                        const cur = groups.get(k) || { key: k, loads: 0, cy: 0 };
+                        cur.loads += 1; cur.cy += (r.quantity || 0);
+                        groups.set(k, cur);
+                    }
+                }
+                const res = {
+                    filtersApplied: f,
+                    totalLoads: loads,
+                    totalCubicYards: Math.round(cy),
+                    loadsWithNoVolume: noVolume,
+                    note: 'Counted over every load in the file, ignoring the on-screen date and map filters.'
+                };
+                if (f.groupBy) {
+                    const g = [...groups.values()];
+                    g.sort((a, b) => (f.groupBy === 'month' || f.groupBy === 'year')
+                                     ? String(a.key).localeCompare(String(b.key))
+                                     : b.cy - a.cy);
+                    res.groupCount = g.length;
+                    res.groups = g.slice(0, f.limit || 20)
+                                  .map(x => ({ key: x.key, loads: x.loads, cy: Math.round(x.cy) }));
+                }
+                return res;
+            }
+            return { error: 'Unknown tool: ' + name };
+        }
+
+        function aiSystemPrompt() {
+            const loaded = rawDailyData && rawDailyData.length
+                ? `${rawDailyData.length.toLocaleString()} loads are currently loaded in the browser, ` +
+                  `spanning ${minDate ? minDate.toLocaleDateString() : '?'} to ${maxDate ? maxDate.toLocaleDateString() : '?'}.`
+                : 'No data file is loaded yet.';
+            return [
+'You are an analyst embedded in a geospatial tool for contaminated-soil disposal in the Permian Basin. You answer questions about the loaded dataset and about how that dataset was built.',
+'',
+loaded,
+'',
+'HOW TO ANSWER',
+'- Use the tools to get numbers. Never estimate a quantity you could have queried, and never present a figure you did not obtain from a tool or from the knowledge base below.',
+'- State the filters behind any number you give: the date range, the site, whether a radius was applied. A bare total invites the reader to assume it covers everything.',
+'- Load counts and cubic yards are different measures and do not move together, because thousands of loads were filed with no quantity. Say which one you are reporting.',
+'- The tools query every load in the file, not the current on-screen filters. If the user is looking at a filtered map, say so rather than letting the two be confused.',
+'- When a question cannot be answered from this data, say so plainly and say what would be needed. Do not approximate to be helpful. An honest "this dataset cannot tell you that" is the correct answer more often than it feels.',
+'- Volumes derived from tons rest on a density assumption, and about a sixth of origins are county centroids accurate to roughly 16 miles. Surface these when they bear on the answer, not otherwise.',
+'- Be concise. Give the number, then the caveat that matters, then stop.',
+'',
+'WHAT YOU KNOW ABOUT THIS DATASET',
+'The following is the curated project record: how the data was sourced, parsed, located and validated, what is missing and why, and which earlier conclusions were later corrected. Rely on it for any question about derivation, reliability or gaps, and cite the entry title when you do.',
+'',
+AI_KNOWLEDGE
+            ].join('\n');
+        }
+
         function prepareDataContext(question) {
             const lowerQuestion = question.toLowerCase();
             const stats = preAggregatedData.statistics;
