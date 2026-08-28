@@ -1725,7 +1725,7 @@
                     📍 Volume by Coordinate Source
                 </div>
                 <div class="stat-item" style="background: rgba(46, 204, 113, 0.1); padding: 0.35rem 0.5rem; margin-bottom: 0.25rem;">
-                    <div class="stat-label" style="font-size: 0.7rem;">From API Lookup</div>
+                    <div class="stat-label" style="font-size: 0.7rem;">From Well Match (API or name)</div>
                     <div class="stat-value" style="font-size: 0.8rem;">
                         <span id="apiCoordVolume">0</span>
                         <span class="stat-unit">CY</span>
@@ -1733,7 +1733,7 @@
                     </div>
                 </div>
                 <div class="stat-item" style="background: rgba(52, 152, 219, 0.1); padding: 0.35rem 0.5rem; margin-bottom: 0.25rem;">
-                    <div class="stat-label" style="font-size: 0.7rem;">From EA Data</div>
+                    <div class="stat-label" style="font-size: 0.7rem;">From GPS on Record</div>
                     <div class="stat-value" style="font-size: 0.8rem;">
                         <span id="eaCoordVolume">0</span>
                         <span class="stat-unit">CY</span>
@@ -2016,7 +2016,7 @@
                             <div style="font-weight: 500; color: var(--accent); margin-bottom: 0.5rem; font-size: 0.75rem;">📍 Volume by Coordinate Source</div>
                         </div>
                         <div class="stat-item" style="background: rgba(46, 204, 113, 0.1); margin-bottom: 0.25rem; padding: 0.35rem 0.5rem;">
-                            <div class="stat-label" style="font-size: 0.7rem;">From API Lookup</div>
+                            <div class="stat-label" style="font-size: 0.7rem;">From Well Match (API or name)</div>
                             <div class="stat-value" style="font-size: 0.8rem;">
                                 <span id="facilityApiCoordVolume">0</span>
                                 <span class="stat-unit">CY</span>
@@ -2024,7 +2024,7 @@
                             </div>
                         </div>
                         <div class="stat-item" style="background: rgba(52, 152, 219, 0.1); margin-bottom: 0.25rem; padding: 0.35rem 0.5rem;">
-                            <div class="stat-label" style="font-size: 0.7rem;">From EA Data</div>
+                            <div class="stat-label" style="font-size: 0.7rem;">From GPS on Record</div>
                             <div class="stat-value" style="font-size: 0.8rem;">
                                 <span id="facilityEaCoordVolume">0</span>
                                 <span class="stat-unit">CY</span>
@@ -3411,6 +3411,61 @@
         }
 
         // Haversine formula for distance calculation
+        // Fold an array to its min and max without spreading it.
+        //
+        // Math.min(...arr) passes one ARGUMENT per element, and V8 overflows the
+        // call stack somewhere past ~100k arguments. That is why an 83k-row file
+        // loaded and a 215k-row one died with "Maximum call stack size exceeded"
+        // — nothing was wrong with the data. Anything sized by row count must
+        // fold rather than spread.
+        // Classify a row's coordinate provenance from its Notes text.
+        //
+        // Two vocabularies are understood on purpose, and the four bucket keys are
+        // unchanged so every downstream panel keeps working untouched:
+        //
+        //   RRC rebuild (2026-)   "[API Lookup] ...", "[Name Match] ...",
+        //                         "[GPS on Record] ...", "[County Centroid] ...",
+        //                         "[Landfill County] ..."
+        //   EnviroAnalytics       "Good API #", "...from EA Data",
+        //                         "Using Center of Indicated County",
+        //                         "Using Center of Landfill County"
+        //
+        // Older workbooks carry only the second form, so both must keep resolving.
+        // API and name matches share the 'API Lookup' bucket: both resolve to a
+        // specific wellbore and are well-precise. Which one produced a given row is
+        // recorded per-row in Notes.
+        function classifyCoordSource(note) {
+            if (!note) return 'Unknown';
+            const n = String(note).trim();
+
+            const tag = n.match(/^\[([^\]]+)\]/);
+            if (tag) {
+                switch (tag[1]) {
+                    case 'API Lookup':
+                    case 'Name Match':      return 'API Lookup';
+                    case 'GPS on Record':   return 'EA Data';
+                    case 'County Centroid': return 'County Centroid';
+                    case 'Landfill County': return 'Landfill County';
+                }
+            }
+
+            if (n.includes('Good API')) return 'API Lookup';
+            if (n.includes('EA Data')) return 'EA Data';
+            if (n.includes('Indicated County')) return 'County Centroid';
+            if (n.includes('Landfill County')) return 'Landfill County';
+            return 'Unknown';
+        }
+
+        function minMaxOf(arr) {
+            let lo = Infinity, hi = -Infinity;
+            for (let i = 0; i < arr.length; i++) {
+                const v = +arr[i];
+                if (v < lo) lo = v;
+                if (v > hi) hi = v;
+            }
+            return { lo, hi };
+        }
+
         function calculateDistance(lat1, lon1, lat2, lon2) {
             const R = 3959; // Earth's radius in miles
             const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -3553,19 +3608,7 @@
                     const basin = row['Basin'] || 'Unknown';
                     
                     // Get coordinate source from Notes column
-                    let coordSource = 'Unknown';
-                    if (row['Notes']) {
-                        const note = String(row['Notes']).trim();
-                        if (note.includes('Good API')) {
-                            coordSource = 'API Lookup';
-                        } else if (note.includes('EA Data')) {
-                            coordSource = 'EA Data';
-                        } else if (note.includes('Indicated County')) {
-                            coordSource = 'County Centroid';
-                        } else if (note.includes('Landfill County')) {
-                            coordSource = 'Landfill County';
-                        }
-                    }
+                    const coordSource = classifyCoordSource(row['Notes']);
                     
                     // Get coordinates - Data is pre-cleaned, all should be valid!
                     let lat = Number(parseFloat(row['Wellsite Lat']));
@@ -3662,10 +3705,11 @@
                     throw new Error('No valid dates found in data');
                 }
                 
-                minDate = new Date(Math.min(...dates));
+                const dateRange = minMaxOf(dates);
+                minDate = new Date(dateRange.lo);
                 minDate.setHours(0, 0, 0, 0);
                 
-                maxDate = new Date(Math.max(...dates));
+                maxDate = new Date(dateRange.hi);
                 maxDate.setHours(23, 59, 59, 999);
                 
                 console.log('Data date range:', minDate, 'to', maxDate);
@@ -8066,7 +8110,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             });
             
             const avgDist = distances.length > 0 ? distances.reduce((a, b) => a + b, 0) / distances.length : 0;
-            const maxDist = distances.length > 0 ? Math.max(...distances) : 0;
+            const maxDist = distances.length > 0 ? minMaxOf(distances).hi : 0;
             
             let result = `Average Haul Distance: ${formatNumber(avgDist, 2)} miles\nMaximum Distance: ${formatNumber(maxDist, 2)} miles\n\n`;
             result += 'Top 5 Transporters by Avg Distance:\n';
