@@ -2,8 +2,8 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.14                                                ║
-    ║  Last Updated: August 2026                                    ║
+    ║  VERSION: 1.15                                                ║
+    ║  Last Updated: October 2026                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
     ║    1. This comment block                                      ║
@@ -18,7 +18,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.14</title>
+    <title>Contaminated Soil Geospatial Analysis v1.15</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -1022,6 +1022,25 @@
             animation: ul-spin 0.8s linear infinite;
             margin-left: 0.25rem;
         }
+
+        /* Texas Pacific Land (TPL) toggle -- reuses .ul-toggle-* layout */
+        .tpl-toggle-label input[type="checkbox"] { accent-color: #26c6da; }
+        .tpl-toggle-swatch {
+            width: 14px; height: 14px; border-radius: 3px; display: inline-block;
+            background: linear-gradient(135deg, #26c6da 0 50%, #ec407a 50% 100%);
+            border: 2px solid #ffffff;
+        }
+        .tpl-loading-spinner {
+            display: inline-block; width: 12px; height: 12px;
+            border: 2px solid rgba(38, 198, 218, 0.3); border-top-color: #26c6da;
+            border-radius: 50%; animation: ul-spin 0.8s linear infinite; margin-left: 0.25rem;
+        }
+        .tpl-legend-block { display: none; margin-top: 0.35rem; padding-top: 0.35rem; border-top: 1px solid var(--border); }
+        .tpl-legend-block.active { display: block; }
+        .tpl-legend-sub { font-size: 0.68rem; opacity: 0.75; margin: 0 0 0.2rem 0; }
+        .tpl-legend-item.off { opacity: 0.35; }
+        .tpl-legend-item { cursor: pointer; }
+        .tpl-legend-ac { opacity: 0.7; font-size: 0.7rem; margin-left: 0.25rem; }
 
         @keyframes ul-spin {
             to { transform: rotate(360deg); }
@@ -2051,7 +2070,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.14";
+        const APP_VERSION = "1.15";
         // Keep the on-screen version label in sync with APP_VERSION.
         document.addEventListener('DOMContentLoaded', function () {
             const el = document.getElementById('appVersionLabel');
@@ -2099,6 +2118,9 @@
         let map, radiusCircles = [], wellMarkers = [], landfillMarkers = {};
         let universityLandsLayer = null; // GeoJSON layer for University Lands overlay
         let universityLandsLoaded = false; // Whether UL data has been fetched
+        let tplLayer = null;          // GeoJSON layer for Texas Pacific Land overlay (v1.15)
+        let tplLoaded = false;        // Whether TPL parcels have been fetched
+        const tplHiddenEntities = new Set(); // entity keys toggled off from the legend
         let centerpointMarker = null; // Marker for dataset geographic center
         let volumeCenterMarker = null; // Marker for volume-weighted center (strategic placement)
         let myFacilityMarker = null; // Marker for user's proposed facility
@@ -2265,6 +2287,32 @@
             };
             ulToggle.addTo(map);
 
+            // Add Texas Pacific Land toggle control (v1.15)
+            const tplToggle = L.control({ position: 'topright' });
+            tplToggle.onAdd = function() {
+                const div = L.DomUtil.create('div', 'ul-toggle-control');
+                div.innerHTML = `
+                    <label class="ul-toggle-label tpl-toggle-label">
+                        <input type="checkbox" id="tplToggleCheckbox">
+                        <span class="tpl-toggle-swatch"></span>
+                        Texas Pacific Land
+                        <span id="tplLoadingSpinner" style="display:none;" class="tpl-loading-spinner"></span>
+                    </label>
+                `;
+                L.DomEvent.disableClickPropagation(div);
+                L.DomEvent.disableScrollPropagation(div);
+                div.querySelector('#tplToggleCheckbox').addEventListener('change', function() {
+                    if (this.checked) {
+                        loadTPLLands();
+                    } else {
+                        if (tplLayer) map.removeLayer(tplLayer);
+                        setTPLLegendVisible(false);
+                    }
+                });
+                return div;
+            };
+            tplToggle.addTo(map);
+
             // Add legend
             const legend = L.control({ position: 'bottomright' });
             legend.onAdd = function() {
@@ -2295,7 +2343,13 @@
                         <div class="legend-marker" style="background: rgba(191,87,0,0.4); border: 2px solid #bf5700; border-radius: 3px;"></div>
                         <span>University Lands</span>
                     </div>
+                    <div class="tpl-legend-block" id="tplLegendBlock">
+                        <div class="legend-item" style="margin-bottom:0.1rem;"><strong>Texas Pacific Land</strong></div>
+                        <div class="tpl-legend-sub">Surface tracts by owner of record &middot; click to show/hide</div>
+                        <div id="tplLegendItems"></div>
+                    </div>
                 `;
+                L.DomEvent.disableClickPropagation(div);
                 return div;
             };
             legend.addTo(map);
@@ -2391,6 +2445,258 @@
                 if (spinner) spinner.style.display = 'none';
             }
         }
+
+        // ============================================================
+        // TEXAS PACIFIC LAND (TPL) OVERLAY -- v1.15
+        // ------------------------------------------------------------
+        // Source: TxGIO StratMap Land Parcels (statewide appraisal-district
+        // parcels). That service has `query` disabled, so parcels are pulled
+        // with `identify` + a layerDefs owner filter, one 0.5-degree tile at a
+        // time (each call caps at 2,000 features; no TPL tile comes close).
+        //
+        // TPL holds almost all of its Texas surface through subsidiaries, so
+        // "Texas Pacific Land" alone finds ~1 tract. The owner names below are
+        // the entities listed in TPL's 10-K Exhibit 21.1 as they appear on the
+        // county rolls. Texas only -- New Mexico holdings are not in StratMap.
+        // CAD parcels are not survey-grade.
+        // ============================================================
+        const TPL_SERVICE = 'https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer';
+
+        // Entity key -> display name, colour, and the owner-name prefixes that map to it.
+        const TPL_ENTITIES = [
+            { key: 'TPR',      name: 'Texas Pacific Resources LLC',            color: '#26c6da', prefixes: ['TEXAS PACIFIC RESOURCES'] },
+            { key: 'RIVERTON', name: 'Riverton Holdings LLC',                  color: '#ec407a', prefixes: ['RIVERTON HOLDINGS'] },
+            { key: 'EAGLE',    name: 'Texas Eagle Ranches LLC',                color: '#9ccc65', prefixes: ['TEXAS EAGLE RANCHES'] },
+            { key: 'ROYALTY',  name: 'Texas Pacific Royalty Acquisitions LLC', color: '#ffffff', prefixes: ['TEXAS PACIFIC ROYALTY ACQ'] },
+            { key: 'TPLOTHER', name: 'Texas Pacific Land (other entities)',     color: '#7e57c2', prefixes: ['TEXAS PACIFIC LAND', 'TPL HOLDINGS', 'TEXAS PACIFIC WATER'] }
+        ];
+        const TPL_OWNER_WHERE = '(' + TPL_ENTITIES.flatMap(e => e.prefixes)
+            .map(p => `OWNER_NAME like '${p}%'`).join(' OR ') + ')';
+
+        // 0.5-degree tiles (SW corner lon, lat) that held TPL parcels in the
+        // Oct 2026 survey of -106.7..-98.2 W, 29..35 N. Re-survey if TPL buys
+        // land outside these; tplSurveyTiles() below does a full sweep.
+        const TPL_TILES = [[-106.7,31.5],[-106.2,31],[-106.2,31.5],[-105.7,30.5],[-105.7,31],[-105.7,31.5],[-105.7,32],
+            [-105.2,30.5],[-105.2,31],[-105.2,31.5],[-104.7,30.5],[-104.7,31],[-104.7,31.5],[-104.7,32],[-104.2,31],
+            [-104.2,31.5],[-104.2,32],[-103.7,30.5],[-103.7,31],[-103.7,31.5],[-103.7,32],[-103.2,30.5],[-103.2,31],
+            [-103.2,31.5],[-103.2,32],[-102.7,31],[-102.7,31.5],[-102.7,32],[-102.2,31.5],[-102.2,32],[-101.7,31.5],
+            [-101.7,32],[-101.2,31.5],[-101.2,32],[-100.7,32],[-100.2,32],[-99.7,31],[-99.7,32.5]];
+
+        function tplEntityFor(ownerName) {
+            const o = String(ownerName || '').toUpperCase().replace(/,/g, '');
+            return TPL_ENTITIES.find(e => e.prefixes.some(p => o.startsWith(p))) || TPL_ENTITIES[TPL_ENTITIES.length - 1];
+        }
+
+        // JSONP fallback: ArcGIS REST honours `callback=`, which works even
+        // where CORS does not (e.g. the file opened from disk in some browsers).
+        let _tplJsonpSeq = 0;
+        function tplJsonp(url, timeoutMs = 30000) {
+            return new Promise((resolve, reject) => {
+                const cb = '__tplcb' + (++_tplJsonpSeq);
+                const s = document.createElement('script');
+                const t = setTimeout(() => { cleanup(); reject(new Error('JSONP timeout')); }, timeoutMs);
+                function cleanup() { clearTimeout(t); delete window[cb]; s.remove(); }
+                window[cb] = data => { cleanup(); resolve(data); };
+                s.onerror = () => { cleanup(); reject(new Error('JSONP load error')); };
+                s.src = url + '&callback=' + cb;
+                document.head.appendChild(s);
+            });
+        }
+        let _tplUseJsonp = false;
+        async function tplGet(url) {
+            if (!_tplUseJsonp) {
+                try {
+                    const r = await fetch(url);
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return await r.json();
+                } catch (e) {
+                    console.warn('TPL: fetch failed (' + e.message + '); switching to JSONP');
+                    _tplUseJsonp = true;
+                }
+            }
+            return tplJsonp(url);
+        }
+
+        function tplIdentifyUrl(x0, y0, x1, y1, withGeometry) {
+            const p = new URLSearchParams({
+                geometry: JSON.stringify({ xmin: x0, ymin: y0, xmax: x1, ymax: y1, spatialReference: { wkid: 4326 } }),
+                geometryType: 'esriGeometryEnvelope', sr: '4326', tolerance: '1',
+                mapExtent: `${x0},${y0},${x1},${y1}`, imageDisplay: '800,800,96',
+                layers: 'all:0', layerDefs: '0:' + TPL_OWNER_WHERE,
+                returnGeometry: withGeometry ? 'true' : 'false',
+                maxAllowableOffset: '0.0003', geometryPrecision: '5', f: 'json'
+            });
+            return TPL_SERVICE + '/identify?' + p.toString();
+        }
+
+        // Run async tasks with limited concurrency.
+        async function tplPool(items, limit, fn) {
+            const out = new Array(items.length); let i = 0;
+            async function worker() { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } }
+            await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+            return out;
+        }
+
+        async function fetchTPLFeatures() {
+            const byObjectId = new Map();
+            let failedTiles = 0, cappedTiles = 0;
+            await tplPool(TPL_TILES, 6, async ([x, y]) => {
+                try {
+                    const r = await tplGet(tplIdentifyUrl(x, y, x + 0.5, y + 0.5, true));
+                    if (r.error) throw new Error(r.error.message);
+                    const res = r.results || [];
+                    if (res.length >= 2000) cappedTiles++;
+                    for (const f of res) {
+                        const id = f.attributes.objectid || f.attributes.OBJECTID;
+                        if (!byObjectId.has(id)) byObjectId.set(id, f);
+                    }
+                } catch (e) {
+                    failedTiles++;
+                    console.error(`TPL: tile ${x},${y} failed:`, e);
+                }
+            });
+            if (cappedTiles) console.warn(`TPL: ${cappedTiles} tile(s) hit the 2,000-feature cap -- split TPL_TILES`);
+
+            // Several appraisal accounts can share one polygon; merge them so the
+            // tract is drawn (and its acres counted) once.
+            const byGeom = new Map();
+            for (const f of byObjectId.values()) {
+                if (!f.geometry || !f.geometry.rings) continue;
+                const k = JSON.stringify(f.geometry.rings);
+                const a = f.attributes;
+                if (!byGeom.has(k)) byGeom.set(k, { a, rings: f.geometry.rings, ids: [a.PROP_ID] });
+                else if (!byGeom.get(k).ids.includes(a.PROP_ID)) byGeom.get(k).ids.push(a.PROP_ID);
+            }
+            const features = [...byGeom.values()].map(({ a, rings, ids }) => {
+                const ent = tplEntityFor(a.OWNER_NAME);
+                return {
+                    type: 'Feature',
+                    properties: {
+                        entity: ent.key, owner_name: a.OWNER_NAME, county: a.COUNTY,
+                        legal_desc: a.LEGAL_DESC, legal_ac: parseFloat(a.LEGAL_AREA) || null,
+                        prop_id: ids.join('; '), tax_year: a.TAX_YEAR, source: a.SOURCE
+                    },
+                    geometry: { type: 'Polygon', coordinates: rings }
+                };
+            });
+            return { features, failedTiles };
+        }
+
+        function tplStyle(feature) {
+            const ent = TPL_ENTITIES.find(e => e.key === feature.properties.entity) || TPL_ENTITIES[0];
+            return { fillColor: ent.color, fillOpacity: 0.40, color: ent.color, weight: 1.2, opacity: 0.95 };
+        }
+
+        function tplEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+        function tplPopup(p) {
+            const ent = TPL_ENTITIES.find(e => e.key === p.entity) || TPL_ENTITIES[0];
+            const ac = p.legal_ac != null ? p.legal_ac.toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' ac' : 'N/A';
+            const titleColor = ent.key === 'ROYALTY' ? '#555' : ent.color;
+            return `
+                <div style="font-family: 'Inter', sans-serif; min-width: 200px;">
+                    <div style="font-weight: 700; font-size: 1rem; color: ${titleColor}; margin-bottom: 0.15rem;">Texas Pacific Land</div>
+                    <div style="font-size: 0.78rem; color: #555; margin-bottom: 0.4rem;">${tplEsc(ent.name)}</div>
+                    <div style="font-size: 0.85rem; color: #333; line-height: 1.55;">
+                        <strong>Owner of record:</strong> ${tplEsc(p.owner_name)}<br>
+                        <strong>County:</strong> ${tplEsc(p.county)}<br>
+                        <strong>Legal:</strong> ${tplEsc(p.legal_desc)}<br>
+                        <strong>Acres (CAD):</strong> ${ac}<br>
+                        <strong>Prop ID:</strong> ${tplEsc(p.prop_id)}<br>
+                        <span style="font-size: 0.72rem; color: #777;">${tplEsc(p.source)} &middot; tax year ${tplEsc(p.tax_year)} &middot; not survey-grade</span>
+                    </div>
+                </div>`;
+        }
+
+        function setTPLLegendVisible(on) {
+            const b = document.getElementById('tplLegendBlock');
+            if (b) b.classList.toggle('active', !!on);
+        }
+
+        function applyTPLEntityFilter() {
+            if (!tplLayer) return;
+            tplLayer.eachLayer(l => {
+                const hidden = tplHiddenEntities.has(l.feature.properties.entity);
+                l.setStyle(hidden ? { opacity: 0, fillOpacity: 0 } : tplStyle(l.feature));
+                if (l._path) l._path.style.pointerEvents = hidden ? 'none' : '';
+            });
+        }
+
+        function renderTPLLegend(features) {
+            const box = document.getElementById('tplLegendItems');
+            if (!box) return;
+            const stats = {};
+            for (const f of features) {
+                const s = stats[f.properties.entity] || (stats[f.properties.entity] = { n: 0, ac: 0 });
+                s.n++; s.ac += f.properties.legal_ac || 0;
+            }
+            box.innerHTML = TPL_ENTITIES.filter(e => stats[e.key]).map(e => `
+                <div class="legend-item tpl-legend-item${tplHiddenEntities.has(e.key) ? ' off' : ''}" data-entity="${e.key}"
+                     title="${stats[e.key].n.toLocaleString()} tracts">
+                    <div class="legend-marker" style="background: ${e.color}66; border: 2px solid ${e.color}; border-radius: 3px;"></div>
+                    <span>${tplEsc(e.name)}<span class="tpl-legend-ac">${Math.round(stats[e.key].ac / 1000).toLocaleString()}k ac</span></span>
+                </div>`).join('');
+            box.querySelectorAll('.tpl-legend-item').forEach(el => el.addEventListener('click', () => {
+                const k = el.dataset.entity;
+                if (tplHiddenEntities.has(k)) tplHiddenEntities.delete(k); else tplHiddenEntities.add(k);
+                el.classList.toggle('off', tplHiddenEntities.has(k));
+                applyTPLEntityFilter();
+            }));
+        }
+
+        async function loadTPLLands() {
+            if (tplLoaded && tplLayer) {
+                tplLayer.addTo(map);
+                setTPLLegendVisible(true);
+                return;
+            }
+            const spinner = document.getElementById('tplLoadingSpinner');
+            if (spinner) spinner.style.display = 'inline-block';
+            try {
+                const { features, failedTiles } = await fetchTPLFeatures();
+                if (!features.length) throw new Error(failedTiles ? 'all requests failed' : 'no parcels returned');
+                console.log(`Texas Pacific Land: ${features.length} tracts` + (failedTiles ? ` (${failedTiles} tile(s) failed -- overlay incomplete)` : ''));
+
+                tplLayer = L.geoJSON({ type: 'FeatureCollection', features }, {
+                    style: tplStyle,
+                    onEachFeature: (feature, layer) => layer.bindPopup(tplPopup(feature.properties))
+                });
+                // The user may have unticked the box while we were loading.
+                const cb = document.getElementById('tplToggleCheckbox');
+                if (!cb || cb.checked) {
+                    tplLayer.addTo(map);
+                    setTPLLegendVisible(true);
+                }
+                tplLoaded = true;
+                renderTPLLegend(features);
+                applyTPLEntityFilter();
+                if (failedTiles) alert(`Texas Pacific Land overlay loaded, but ${failedTiles} of ${TPL_TILES.length} map tiles failed, so some tracts may be missing. Toggle off and on to retry.`);
+                if (failedTiles) { tplLoaded = false; }
+            } catch (error) {
+                console.error('Failed to load Texas Pacific Land data:', error);
+                alert('Failed to load the Texas Pacific Land overlay (TxGIO parcel service). Check your internet connection and try again.');
+                const cb = document.getElementById('tplToggleCheckbox');
+                if (cb) cb.checked = false;
+            } finally {
+                if (spinner) spinner.style.display = 'none';
+            }
+        }
+
+        // Maintenance helper (run from the browser console): sweeps the whole
+        // Permian window and prints a fresh TPL_TILES array.
+        async function tplSurveyTiles(x0 = -106.7, x1 = -98.2, y0 = 29, y1 = 35) {
+            const tiles = [];
+            for (let x = x0; x < x1; x += 0.5) for (let y = y0; y < y1; y += 0.5) tiles.push([+x.toFixed(1), +y.toFixed(1)]);
+            const hits = [];
+            await tplPool(tiles, 6, async ([x, y]) => {
+                const r = await tplGet(tplIdentifyUrl(x, y, x + 0.5, y + 0.5, false));
+                if (r.results && r.results.length) hits.push([x, y]);
+            });
+            hits.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+            console.log('TPL_TILES =', JSON.stringify(hits));
+            return hits;
+        }
+        window.tplSurveyTiles = tplSurveyTiles;
 
         // Haversine formula for distance calculation
         // ---------------------------------------------------------------
