@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.19                                                ║
+    ║  VERSION: 1.20                                                ║
     ║  Last Updated: October 2026                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -18,7 +18,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.19</title>
+    <title>Contaminated Soil Geospatial Analysis v1.20</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -1766,7 +1766,7 @@
                     1️⃣ Click "Add Facility" or "Auto-Place All" to start<br>
                     2️⃣ <strong>Drag facilities</strong> on the map to reposition<br>
                     3️⃣ Watch revenue update in real-time as you move them<br>
-                    4️⃣ Add/remove facilities to test different scenarios (max 6)
+                    4️⃣ Add/remove facilities to test different scenarios (max 10)
                 </div>
                 
                 <!-- Facility Management Controls -->
@@ -2174,7 +2174,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.19";
+        const APP_VERSION = "1.20";
         // Keep the on-screen version label in sync with APP_VERSION.
         document.addEventListener('DOMContentLoaded', function () {
             const el = document.getElementById('appVersionLabel');
@@ -5817,13 +5817,14 @@ let facilitiesConfig = {
 let facilities = [];
 let nextFacilityId = 1;
 
-// Facility colors (up to 6 facilities)
-const facilityColors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#f1c40f'];
+// Facility colors (up to 10 facilities)
+const MAX_FACILITIES = 10;
+const facilityColors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#f1c40f', '#16a085', '#795548', '#1a237e', '#d35400'];
 
 // Add a new facility at specified location
 function addFacility(lat, lng) {
-    if (facilities.length >= 6) {
-        alert('Maximum 6 facilities allowed');
+    if (facilities.length >= MAX_FACILITIES) {
+        alert(`Maximum ${MAX_FACILITIES} facilities allowed`);
         return;
     }
     
@@ -6142,8 +6143,8 @@ function autoPlaceFacilities(count) {
         return;
     }
     
-    if (count < 1 || count > 6) {
-        alert('Please specify 1-6 facilities');
+    if (count < 1 || count > MAX_FACILITIES) {
+        alert(`Please specify 1-${MAX_FACILITIES} facilities`);
         return;
     }
     
@@ -8639,12 +8640,12 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             }
             
             // Prompt for number of facilities
-            const count = prompt('How many facilities would you like to place? (1-6)', '3');
+            const count = prompt(`How many facilities would you like to place? (1-${MAX_FACILITIES})`, '3');
             if (!count) return;
             
             const numFacilities = parseInt(count);
-            if (isNaN(numFacilities) || numFacilities < 1 || numFacilities > 6) {
-                alert('Please enter a number between 1 and 6');
+            if (isNaN(numFacilities) || numFacilities < 1 || numFacilities > MAX_FACILITIES) {
+                alert(`Please enter a number between 1 and ${MAX_FACILITIES}`);
                 return;
             }
             
