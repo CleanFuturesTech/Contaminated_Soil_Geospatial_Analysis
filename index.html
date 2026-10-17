@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.21                                                ║
+    ║  VERSION: 1.22                                                ║
     ║  Last Updated: October 2026                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -18,7 +18,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.21</title>
+    <title>Contaminated Soil Geospatial Analysis v1.22</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -2178,7 +2178,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.21";
+        const APP_VERSION = "1.22";
         // Keep the on-screen version label in sync with APP_VERSION.
         document.addEventListener('DOMContentLoaded', function () {
             const el = document.getElementById('appVersionLabel');
@@ -10549,7 +10549,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         const MI_TO_KM = 1.609344;
         const LENS_KEY = 'csga.lens';
         const MEASURES = {
-            permits: { label: 'Permits', unit: 'permits', color: '#ff7043', note: 'Texas only (Form W-1 new-drill permits)' },
+            permits: { label: 'Permits', unit: 'permits', color: '#ff7043', note: 'TX Form W-1 new-drill permits · NM APD approvals (OCD)' },
             drilled: { label: 'Wells drilled', unit: 'wells', color: '#ffca28', note: 'TX drilling-finished date · NM spud date' },
             completions: { label: 'Completions', unit: 'frac jobs', color: '#4fc3f7', note: 'Frac jobs reported to FracFocus, by job end date (TX + NM)' },
             queued:  { label: 'Queued wells', unit: 'wells', color: '#ce93d8', note: 'Permitted or approved, not yet drilled' }
@@ -10562,15 +10562,15 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
 
         let B = null;                 // packed bundle
         let lens = 'soil';
-        const S = { measure: 'permits', start: 0, end: 0, display: 'heat', hzOnly: false };
+        const S = { measure: 'permits', start: 0, end: 0, display: 'heat', hzOnly: false, state: 'both' };
         let heatLayer = null, dotLayer = null, canvasRenderer = null, panelEl = null, legendEl = null, playTimer = null;
         const scaleCache = {};        // measure -> fixed colour-scale max (per 100 km² per year)
 
         // ---------- bundle ----------
-        // Permit -> drilled link (Texas only), by API number.
+        // Permit -> drilled link, by API number (Tracker files: Texas only).
         //   permit: pdm = month index it was drilled (-1 none yet, -2 only an earlier drilling record = re-permit), plag = days
         //   drilled (TX): dpm = month index of its latest permit on or before the drilling date (-1 none in data), dlag = days
-        // "Drilled" is the TX completion-report date (drilling finished). NM has no permit dates in public data.
+        // "Drilled" is the TX completion-report date (drilling finished) / NM spud date.
         function linkPermitsToDrilled(pd) {
             const mIdx = new Map(pd.months.map((m, i) => [m, i]));
             const toDays = s => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)) / 864e5;
@@ -10642,7 +10642,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             const okXY = (la, lo) => la != null && lo != null && la > 25 && la < 37.5 && lo > -110 && lo < -95;
             const hzOf = v => String(v || '').toUpperCase() === 'Y' ? 1 : 0;
 
-            const permits = { i: [], lat: [], lon: [], hz: [], op: [], pdm: [], plag: [] };
+            const permits = { i: [], lat: [], lon: [], hz: [], op: [], st: [], pdm: [], plag: [] };
             let permitsThrough = '';
             for (const r of P) {
                 const d = ymdOf(r['Issued']), la = num(r['Latitude']), lo = num(r['Longitude']), i = mi(d);
@@ -10651,6 +10651,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 const drl = ymdOf(r['Drilled (linked)']), life = String(r['Lifecycle'] || '');
                 const repermit = /^re-permit/i.test(life);
                 permits.i.push(i); permits.lat.push(la); permits.lon.push(lo); permits.hz.push(hzOf(r['Horizontal'])); permits.op.push(op(r['Operator']));
+                permits.st.push(String(r['State'] || '').toUpperCase() === 'NM' ? 1 : 0);
                 if (drl && !repermit) { permits.pdm.push(mi(drl)); permits.plag.push(num(r['Days Permit to Drilled']) ?? daysBetween(d, drl)); }
                 else { permits.pdm.push(repermit ? -2 : -1); permits.plag.push(-1); }
             }
@@ -10663,7 +10664,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 const st = String(r['State'] || '').toUpperCase() === 'NM' ? 1 : 0;
                 const pd = ymdOf(r['Permit Date (linked)']), fe = ymdOf(r['Frac End']);
                 drilled.i.push(i); drilled.lat.push(la); drilled.lon.push(lo); drilled.hz.push(hz); drilled.op.push(op(r['Operator'])); drilled.st.push(st);
-                if (st === 0 && pd) { drilled.dpm.push(mi(pd)); drilled.dlag.push(num(r['Days Permit to Drilled']) ?? daysBetween(pd, d)); } else { drilled.dpm.push(-1); drilled.dlag.push(-1); }
+                if (pd) { drilled.dpm.push(mi(pd)); drilled.dlag.push(num(r['Days Permit to Drilled']) ?? daysBetween(pd, d)); } else { drilled.dpm.push(-1); drilled.dlag.push(-1); }
                 if (fe) { drilled.fe.push(mi(fe)); drilled.flag.push(daysBetween(d, fe)); } else { drilled.fe.push(-1); drilled.flag.push(-1); }
             }
             const pipeline = { lat: [], lon: [], hz: [], op: [], kind: [], st: [], d: [] };
@@ -10728,15 +10729,17 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         // Indices of records in the window [start, end] (month indices, inclusive), or the whole queue.
         function selectIdx(measure, start, end) {
             const out = [];
+            const want = S.state === 'tx' ? 0 : S.state === 'nm' ? 1 : -1;
+            const stOk = (b, j) => want < 0 || (b.st ? b.st[j] : 0) === want;
             if (measure === 'queued') {
                 const p = B.pipeline;
-                for (let j = 0; j < p.lat.length; j++) if (!S.hzOnly || p.hz[j] === 1) out.push(j);
+                for (let j = 0; j < p.lat.length; j++) if ((!S.hzOnly || p.hz[j] === 1) && stOk(p, j)) out.push(j);
                 return out;
             }
             const b = B[measure], lo = start;
             for (let j = 0; j < b.i.length; j++) {
                 const i = b.i[j];
-                if (i >= lo && i <= end && (!S.hzOnly || b.hz[j] === 1)) out.push(j);
+                if (i >= lo && i <= end && (!S.hzOnly || b.hz[j] === 1) && stOk(b, j)) out.push(j);
             }
             return out;
         }
@@ -10809,9 +10812,9 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 for (let e = 11; e <= maxEnd; e++) { let s = 0; for (let i = e - 11; i <= e; i++) s += counts[i]; if (s > best) { best = s; bestEnd = e; } }
                 end = bestEnd;
             }
-            const keepHz = S.hzOnly; S.hzOnly = false;
+            const keepHz = S.hzOnly, keepSt = S.state; S.hzOnly = false; S.state = 'both';   // one fixed scale per measure
             const g = densityGrid(measure, selectIdx(measure, end - 11, end));
-            S.hzOnly = keepHz;
+            S.hzOnly = keepHz; S.state = keepSt;
             const v = Array.from(g).filter(x => x > 0.01).sort((a, b) => a - b);
             const m = v.length ? v[Math.floor(v.length * 0.995)] : 1;
             scaleCache[measure] = Math.max(m, 0.1);
@@ -10852,7 +10855,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 if (!p.pdm) return base;
                 if (p.pdm[j] >= 0) return `${base} → drilled ${mlabel(p.pdm[j])} <span class="drill-muted">(${moLag(p.plag[j])} mo)</span>`;
                 if (p.pdm[j] === -2) return `${base}<br><span class="drill-muted">Re-permit: this well already has an earlier drilling record</span>`;
-                return `${base}<br><b>Not yet drilled</b> <span class="drill-muted">(no TX completion report yet)</span>`;
+                return `${base}<br><b>Not yet drilled</b> <span class="drill-muted">(${p.st && p.st[j] === 1 ? 'NM: not spudded yet' : 'no TX completion report yet'})</span>`;
             }
             if (measure === 'completions') {
                 const c = B.completions;
@@ -10862,7 +10865,9 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             const frac = !d.fe ? '' : (d.fe[j] >= 0
                 ? `<br>Frac'd ${mlabel(d.fe[j])} <span class="drill-muted">(${moLag(Math.max(0, d.flag[j]))} mo after ${d.st[j] === 1 ? 'spud' : 'drilling'})</span>`
                 : `<br><span class="drill-muted">No frac job reported to FracFocus yet</span>`);
-            if (d.st[j] === 1) return `Spudded ${mlabel(d.i[j])} <span class="drill-muted">(NM: no permit date in public data)</span>${frac}`;
+            if (d.st[j] === 1) return (d.dpm && d.dpm[j] >= 0
+                ? `Permitted ${mlabel(d.dpm[j])} → spudded ${mlabel(d.i[j])} <span class="drill-muted">(${moLag(d.dlag[j])} mo)</span>`
+                : `Spudded ${mlabel(d.i[j])} <span class="drill-muted">(no APD approval in the OCD extract)</span>`) + frac;
             const done = `Drilled ${mlabel(d.i[j])}`;
             if (!d.dpm) return done + frac;
             if (d.dpm[j] >= 0) return `Permitted ${mlabel(d.dpm[j])} → drilled ${mlabel(d.i[j])} <span class="drill-muted">(${moLag(d.dlag[j])} mo)</span>${frac}`;
@@ -10927,7 +10932,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             if (measure === 'drilled') {
                 const d = B.drilled; if (!d.dpm) return null;
                 const lags = []; let fracd = 0;
-                for (const j of idx) { if (d.st[j] === 0 && d.dpm[j] >= 0) lags.push(d.dlag[j]); if (d.fe && d.fe[j] >= 0) fracd++; }
+                for (const j of idx) { if (d.dpm[j] >= 0) lags.push(d.dlag[j]); if (d.fe && d.fe[j] >= 0) fracd++; }
                 return { pct: null, med: median(lags), n: lags.length, frac: d.fe && idx.length ? fracd / idx.length * 100 : null };
             }
             return null;
@@ -10967,15 +10972,14 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             const head = m === 'queued'
                 ? `<tr><th>Site</th><th class="num">Queued wells</th><th class="num">Basin share</th></tr>`
                 : `<tr><th>Site</th><th class="num">${MEASURES[m].label}${sub(span + ' mo')}</th><th class="num">vs prior${sub(span + ' mo')}</th><th class="num">Basin${sub('share')}</th>
-                   ${hasLife && m === 'permits' ? `<th class="num" title="Share of these permits with a Texas completion report so far">Drilled${sub('so far')}</th>` : ''}
-                   ${hasLife ? `<th class="num" title="Median months from permit to drilling finished (Texas)">Permit→drill${sub('median mo')}</th>` : ''}
+                   ${hasLife && m === 'permits' ? `<th class="num" title="Share of these permits drilled so far (TX completion report / NM spud)">Drilled${sub('so far')}</th>` : ''}
+                   ${hasLife ? `<th class="num" title="Median months from permit to drilled (TX: drilling finished; NM: spud)">Permit→drill${sub('median mo')}</th>` : ''}
                    ${hasFrac ? `<th class="num" title="Share of these wells with a frac job reported to FracFocus">Frac'd${sub('so far')}</th>` : ''}
                    <th class="num">Queued${sub('wells')}</th></tr>`;
             const recent = m === 'permits' && hasLife && S.end > lastFullIdx() - 12;
             const notes = [`Circles overlap, so shares can add to more than 100%.`];
-            if (hasLife) notes.push(m === 'permits'
-                ? `Permit→drill uses Texas completion-report dates (drilling finished), matched by API.`
-                : `Permit→drill is Texas only, for wells whose permit is in the data (issued Jul 2017 or later); New Mexico has no public permit dates.`);
+            if (hasLife) notes.push(`Permit→drill is matched by API: Texas runs to drilling finished, New Mexico to spud, so NM times run shorter; use the TX / NM switch to compare like with like.` +
+                (m === 'drilled' ? ` Wells whose permit predates Jul 2017 are left out of the median.` : ''));
             if (hasFrac) notes.push(`Frac'd = a FracFocus job reported for the well (TX and NM); recent wells may not be fracked or reported yet.`);
             if (recent) notes.push(`<b>Recent permits have not had time to be drilled</b>, so "drilled so far" runs low and the median runs short for windows ending in the last 12 months.`);
             return `<table class="drill-table"><thead>${head}</thead><tbody>${rows}</tbody></table>
@@ -11041,6 +11045,9 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                         <button type="button" data-d="heat" class="${S.display === 'heat' ? 'active' : ''}">Heat</button>
                         <button type="button" data-d="dots" class="${S.display === 'dots' ? 'active' : ''}">Dots</button>
                     </span>
+                    <span class="drill-seg small" role="group" aria-label="State">
+                        ${[['both', 'TX + NM'], ['tx', 'TX'], ['nm', 'NM']].map(([k, l]) => `<button type="button" data-st="${k}" class="${S.state === k ? 'active' : ''}">${l}</button>`).join('')}
+                    </span>
                     <label class="drill-chk"><input type="checkbox" id="drillHz" ${S.hzOnly ? 'checked' : ''}> Horizontal only</label>
                 </div>
                 <div class="drill-note">${noteHtml()}</div>
@@ -11063,6 +11070,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         function wirePanel() {
             panelEl.querySelectorAll('[data-m]').forEach(b => b.onclick = () => setMeasure(b.dataset.m));
             panelEl.querySelectorAll('[data-d]').forEach(b => b.onclick = () => { S.display = b.dataset.d; drawLayers(); renderPanel(); });
+            panelEl.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { S.state = b.dataset.st; drawLayers(); renderPanel(); });
                         const s0 = panelEl.querySelector('#drillStart'), s1 = panelEl.querySelector('#drillEnd');
             if (s0 && s1) {
                 s0.oninput = () => { stopPlay(); S.start = +s0.value; if (S.start > S.end) { S.end = S.start; s1.value = S.end; } drawLayers(); updateWindowOnly(); };
@@ -11258,7 +11266,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             recallBundle().then(b => { if (b && !B && validBundle(b)) { try { useBundle(b, false); } catch (e) { console.warn(e); } } });
 
             window.setAnalysisLens = setLens; // for console / tests
-            window.__drillState = () => ({ lens, measure: S.measure, start: S.start, end: S.end, display: S.display, hzOnly: S.hzOnly, hasBundle: !!B, months: B ? B.months.length : 0 });
+            window.__drillState = () => ({ lens, measure: S.measure, start: S.start, end: S.end, display: S.display, hzOnly: S.hzOnly, state: S.state, hasBundle: !!B, months: B ? B.months.length : 0 });
             window.__drillBundle = () => B; // for console checks
             window.__drillLoadFile = loadDrillingFile; // for tests
         }
