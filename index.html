@@ -2,7 +2,7 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.22                                                ║
+    ║  VERSION: 1.23                                                ║
     ║  Last Updated: October 2026                                   ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
@@ -18,7 +18,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.22</title>
+    <title>Contaminated Soil Geospatial Analysis v1.23</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -1129,6 +1129,10 @@
         .drill-seg button { font-size: 0.72rem; padding: 0.3rem 0.25rem; }
         .drill-panel { width: 490px; }
         .drill-table { font-size: 0.72rem; }
+        .drill-source { display: flex; gap: 0.5rem; justify-content: space-between; align-items: flex-start;
+            border: 1px solid var(--border); border-radius: 6px; padding: 0.45rem 0.55rem; margin-bottom: 0.55rem; font-size: 0.74rem; line-height: 1.35; }
+        .drill-source-mem { border-color: #ffb300; background: rgba(255, 179, 0, 0.10); }
+        .drill-source-btns { display: flex; flex-direction: column; gap: 0.25rem; flex: none; }
         .drill-load-main { font-weight: 600; padding: 0.3rem 0.8rem; border-color: var(--primary); }
 
         /* Texas Pacific Land (TPL) toggle -- reuses .ul-toggle-* layout */
@@ -2178,7 +2182,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.22";
+        const APP_VERSION = "1.23";
         // Keep the on-screen version label in sync with APP_VERSION.
         document.addEventListener('DOMContentLoaded', function () {
             const el = document.getElementById('appVersionLabel');
@@ -10709,6 +10713,10 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
         }
         const rememberBundle = b => idb('readwrite', st => st.put(b, IDB_KEY)).catch(e => console.warn('Drilling lens: could not remember the file in this browser', e));
         const recallBundle = () => idb('readonly', st => st.get(IDB_KEY)).catch(() => null);
+        const forgetBundle = () => idb('readwrite', st => st.delete(IDB_KEY)).catch(e => console.warn('Drilling lens: could not clear the remembered file', e));
+        let fromMemory = false;   // true when B came from this browser's storage rather than a file picked this session
+        const fdt = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }); };
+        const fday = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }); };
 
         function validBundle(b) {
             return b && Array.isArray(b.months) && b.permits && b.drilled && b.pipeline &&
@@ -11022,7 +11030,17 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             if (!panelEl) return;
             if (!B) { panelEl.querySelector('.drill-body').innerHTML = emptyPanelHtml(); wirePanel(); renderLegend(); return; }
             const maxEnd = S.measure === 'drilled' ? lastFullIdx() : lastFullIdx();
-            panelEl.querySelector('.drill-body').innerHTML = `
+            const src = `<b>${esc(B.file || 'drilling data')}</b> <span class="drill-muted">(data built ${esc(fday(B.generated))})</span>`;
+            const banner = fromMemory
+                ? `<div class="drill-source drill-source-mem"><div><b>Remembered from your last session</b> in this browser:<br>${src}${B.loadedAt ? `<br><span class="drill-muted">You loaded it ${esc(fdt(B.loadedAt))}.</span>` : ''}</div>
+                    <div class="drill-source-btns"><button type="button" class="drill-chip drill-load-main" id="drillLoadBtn">Load a newer file…</button>
+                    <button type="button" class="drill-chip" id="drillForget" title="Remove the remembered copy from this browser">Forget</button></div></div>`
+                : `<div class="drill-source"><div>Using ${src}<br><span class="drill-muted">Loaded this session and remembered in this browser only.</span></div>
+                    <div class="drill-source-btns"><button type="button" class="drill-chip" id="drillLoadBtn">Load another file…</button>
+                    <button type="button" class="drill-chip" id="drillForget" title="Remove the remembered copy from this browser">Forget</button></div></div>`;
+            panelEl.querySelector('.drill-body').innerHTML = banner + `<span id="drillLoadStatus" class="drill-muted"></span>
+                <input type="file" id="drillFile" accept=".xlsx,.xls,.html,.htm,.json" style="display:none">`;
+            panelEl.querySelector('.drill-body').innerHTML += `
                 <div class="drill-seg" role="group" aria-label="Measure">
                     ${Object.entries(MEASURES).filter(([k]) => hasMeasure(k)).map(([k, v]) => `<button type="button" data-m="${k}" class="${S.measure === k ? 'active' : ''}">${v.label}</button>`).join('')}
                 </div>
@@ -11053,9 +11071,7 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
                 <div class="drill-note">${noteHtml()}</div>
                 <div class="drill-sites-title">Activity inside your sites' radii</div>
                 <div id="drillSites">${sitesHtml()}</div>
-                <div class="drill-fresh">Drilling data ${B.file ? `<b>${esc(B.file)}</b>, ` : ''}built ${esc(new Date(B.generated).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }))}
-                    · <button type="button" class="drill-linkbtn" id="drillLoadBtn">Load drilling data…</button> <span id="drillLoadStatus" class="drill-muted"></span>
-                    <input type="file" id="drillFile" accept=".xlsx,.xls,.html,.htm,.json" style="display:none"></div>`;
+                <div class="drill-fresh">Drilling data: ${esc(B.file || '')}, built ${esc(fday(B.generated))}${fromMemory ? ' · remembered from your last session' : ''}</div>`;
             wirePanel();
             renderLegend();
         }
@@ -11088,6 +11104,13 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
             if (pl) pl.onclick = () => playTimer ? stopPlay() : startPlay();
             const lb = panelEl.querySelector('#drillLoadBtn'), fi = panelEl.querySelector('#drillFile');
             if (lb && fi) { lb.onclick = () => fi.click(); fi.onchange = () => fi.files[0] && loadDrillingFile(fi.files[0]); }
+            const fg = panelEl.querySelector('#drillForget');
+            if (fg) fg.onclick = async () => {
+                await forgetBundle(); B = null; fromMemory = false; clearLayers(); stopPlay();
+                for (const k in scaleCache) delete scaleCache[k];
+                renderPanel();
+                const st = panelEl.querySelector('#drillLoadStatus'); if (st) st.textContent = 'Removed the remembered file from this browser.';
+            };
             wireSiteButtons();
         }
         function updateWindowOnly() {
@@ -11168,6 +11191,8 @@ ${preAggregatedData.rankings.topWells.map((w, i) =>
 
         function useBundle(nb, remember) {
             if (!validBundle(nb)) throw new Error('File did not contain permits, wells drilled and queue data');
+            if (remember) nb.loadedAt = new Date().toISOString();
+            fromMemory = !remember;
             B = nb; for (const k in scaleCache) delete scaleCache[k];
             if (!hasMeasure(S.measure)) S.measure = 'permits';
             S.end = Math.min(S.measure === 'drilled' ? drillEndIdx() : lastFullIdx(), B.months.length - 1); S.start = Math.max(0, S.end - 11);
