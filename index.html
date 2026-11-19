@@ -2,8 +2,8 @@
 <!--
     ╔═══════════════════════════════════════════════════════════════╗
     ║  CONTAMINATED SOIL GEOSPATIAL ANALYSIS                        ║
-    ║  VERSION: 1.23                                                ║
-    ║  Last Updated: October 2026                                   ║
+    ║  VERSION: 1.24                                                ║
+    ║  Last Updated: November 2026                                  ║
     ║                                                               ║
     ║  Remember to update version in 3 places:                      ║
     ║    1. This comment block                                      ║
@@ -18,7 +18,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contaminated Soil Geospatial Analysis v1.23</title>
+    <title>Contaminated Soil Geospatial Analysis v1.24</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -969,21 +969,23 @@
             background: #ffd700;
         }
 
-        /* University Lands Toggle Control */
-        .ul-toggle-control {
-            background: var(--bg-card);
-            padding: 0.75rem 1rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px var(--shadow);
-            border: 1px solid var(--border);
-            cursor: pointer;
-            user-select: none;
-            transition: all 0.3s;
+        /* Land ownership box (v1.24) -- University Lands, Texas Pacific Land
+           and Johnson Ranch share one control (styled like .basemap-control);
+           each row reuses the .ul-toggle-label layout from v1.15. */
+        .land-control { min-width: 175px; }
+        .land-row { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; }
+        .land-row .ul-toggle-label { flex: 1; }
+        .ul-toggle-label.jr-toggle-label input[type="checkbox"] { accent-color: #c6ff00; } /* outranks the UL accent rule below */
+        .jr-toggle-swatch {
+            width: 14px; height: 14px; border-radius: 3px; display: inline-block;
+            background: rgba(198, 255, 0, 0.35); border: 2px solid #c6ff00;
         }
-
-        .ul-toggle-control:hover {
-            border-color: var(--primary-light);
+        .jr-zoom {
+            font: inherit; font-size: 0.72rem; line-height: 1; padding: 0.2rem 0.45rem; border-radius: 4px;
+            cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text-primary);
+            white-space: nowrap;
         }
+        .jr-zoom:hover { border-color: var(--primary-light); }
 
         .ul-toggle-label {
             display: flex;
@@ -2182,7 +2184,7 @@
         // ============================================================
         // APPLICATION VERSION - UPDATE THIS WITH EACH CODE CHANGE
         // ============================================================
-        const APP_VERSION = "1.23";
+        const APP_VERSION = "1.24";
         // Keep the on-screen version label in sync with APP_VERSION.
         document.addEventListener('DOMContentLoaded', function () {
             const el = document.getElementById('appVersionLabel');
@@ -2233,6 +2235,7 @@
         let tplLayer = null;          // GeoJSON layer for Texas Pacific Land overlay (v1.15)
         let tplLoaded = false;        // Whether TPL parcels have been fetched
         const tplHiddenEntities = new Set(); // entity keys toggled off from the legend
+        let jrLayer = null;           // GeoJSON layer for Johnson Ranch overlay (v1.24, embedded KMZ)
         let centerpointMarker = null; // Marker for dataset geographic center
         let volumeCenterMarker = null; // Marker for volume-weighted center (strategic placement)
         let myFacilityMarker = null; // Marker for user's proposed facility
@@ -2537,22 +2540,44 @@
             updateBasemapButtons();
             map.on('zoomend', updateCountyLabelVisibility);
 
-            // Add University Lands toggle control
-            const ulToggle = L.control({ position: 'topright' });
-            ulToggle.onAdd = function() {
-                const div = L.DomUtil.create('div', 'ul-toggle-control');
+            // Land ownership overlays (v1.24): University Lands (v1.0), Texas
+            // Pacific Land (v1.15) and Johnson Ranch (v1.24) in one box, one
+            // checkbox each. Checkbox ids are unchanged -- the loaders below
+            // still look them up to untick on failure.
+            const landCtl = L.control({ position: 'topright' });
+            landCtl.onAdd = function() {
+                const div = L.DomUtil.create('div', 'basemap-control land-control');
                 div.innerHTML = `
-                    <label class="ul-toggle-label">
-                        <input type="checkbox" id="ulToggleCheckbox">
-                        <span class="ul-toggle-swatch"></span>
-                        University Lands
-                        <span id="ulLoadingSpinner" style="display:none;" class="ul-loading-spinner"></span>
-                    </label>
+                    <div class="basemap-title">Land ownership</div>
+                    <div class="land-row">
+                        <label class="ul-toggle-label">
+                            <input type="checkbox" id="ulToggleCheckbox">
+                            <span class="ul-toggle-swatch"></span>
+                            University Lands
+                            <span id="ulLoadingSpinner" style="display:none;" class="ul-loading-spinner"></span>
+                        </label>
+                    </div>
+                    <div class="land-row">
+                        <label class="ul-toggle-label tpl-toggle-label">
+                            <input type="checkbox" id="tplToggleCheckbox">
+                            <span class="tpl-toggle-swatch"></span>
+                            Texas Pacific Land
+                            <span id="tplLoadingSpinner" style="display:none;" class="tpl-loading-spinner"></span>
+                        </label>
+                    </div>
+                    <div class="land-row">
+                        <label class="ul-toggle-label jr-toggle-label">
+                            <input type="checkbox" id="jrToggleCheckbox">
+                            <span class="jr-toggle-swatch"></span>
+                            Johnson Ranch
+                        </label>
+                        <button type="button" class="jr-zoom" id="jrZoomBtn" title="Zoom the map to Johnson Ranch">Zoom to</button>
+                    </div>
                 `;
                 // Prevent map click-through
                 L.DomEvent.disableClickPropagation(div);
                 L.DomEvent.disableScrollPropagation(div);
-                
+
                 div.querySelector('#ulToggleCheckbox').addEventListener('change', function() {
                     if (this.checked) {
                         loadUniversityLands();
@@ -2562,24 +2587,6 @@
                         }
                     }
                 });
-                return div;
-            };
-            ulToggle.addTo(map);
-
-            // Add Texas Pacific Land toggle control (v1.15)
-            const tplToggle = L.control({ position: 'topright' });
-            tplToggle.onAdd = function() {
-                const div = L.DomUtil.create('div', 'ul-toggle-control');
-                div.innerHTML = `
-                    <label class="ul-toggle-label tpl-toggle-label">
-                        <input type="checkbox" id="tplToggleCheckbox">
-                        <span class="tpl-toggle-swatch"></span>
-                        Texas Pacific Land
-                        <span id="tplLoadingSpinner" style="display:none;" class="tpl-loading-spinner"></span>
-                    </label>
-                `;
-                L.DomEvent.disableClickPropagation(div);
-                L.DomEvent.disableScrollPropagation(div);
                 div.querySelector('#tplToggleCheckbox').addEventListener('change', function() {
                     if (this.checked) {
                         loadTPLLands();
@@ -2588,9 +2595,14 @@
                         setTPLLegendVisible(false);
                     }
                 });
+                div.querySelector('#jrToggleCheckbox').addEventListener('change', function() {
+                    if (this.checked) loadJohnsonRanch();
+                    else if (jrLayer) map.removeLayer(jrLayer);
+                });
+                div.querySelector('#jrZoomBtn').addEventListener('click', zoomToJohnsonRanch);
                 return div;
             };
-            tplToggle.addTo(map);
+            landCtl.addTo(map);
 
             // Add legend
             const legend = L.control({ position: 'bottomright' });
@@ -2621,6 +2633,10 @@
                     <div class="legend-item">
                         <div class="legend-marker" style="background: rgba(191,87,0,0.4); border: 2px solid #bf5700; border-radius: 3px;"></div>
                         <span>University Lands</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-marker" style="background: rgba(198,255,0,0.35); border: 2px solid #c6ff00; border-radius: 3px;"></div>
+                        <span>Johnson Ranch</span>
                     </div>
                     <div class="tpl-legend-block" id="tplLegendBlock">
                         <div class="legend-item" style="margin-bottom:0.1rem;"><strong>Texas Pacific Land</strong></div>
@@ -2976,6 +2992,117 @@
             return hits;
         }
         window.tplSurveyTiles = tplSurveyTiles;
+
+        // ============================================================
+        // JOHNSON RANCH OVERLAY -- v1.24
+        // ------------------------------------------------------------
+        // Source: "Johnson Ranch Boundaries.kmz" (Google Earth export,
+        // Nov 2026), converted to GeoJSON and embedded below so the overlay
+        // needs no network call. 50 polygons in Ector County, NW of Odessa:
+        //   - 42 named tracts (ids like T1S00-43045-001AU, as drawn in the KMZ;
+        //     T2S00-42007-0003U appears twice as two separate pieces)
+        //   - 6 "Untitled Polygon" rectangles of ~560-680 ac each; one sits on
+        //     top of tract T2S00-43002-0001U, so tract and rectangle acreage
+        //     must not simply be summed
+        //   - "Dahlia 1" / "Dahlia 2": ~34 ac and ~26 ac outlines inside the
+        //     western tracts, drawn in the KMZ with no fill (kept that way)
+        // Acreage is computed from the KMZ geometry on an equal-area
+        // projection, not taken from CAD records. The KMZ is not survey-grade.
+        // To refresh: convert the new KMZ to GeoJSON (name, kind, ac per
+        // feature; 6-decimal coordinates) and replace JOHNSON_RANCH_GEOJSON.
+        // ============================================================
+        const JR_COLOR = '#c6ff00';
+        const JOHNSON_RANCH_GEOJSON = { type: 'FeatureCollection', features: [
+            {"type":"Feature","properties":{"name":"T1S00-44037-0001U","kind":"tract","ac":338.0},"geometry":{"type":"Polygon","coordinates":[[[-102.563908,31.886451],[-102.547958,31.890214],[-102.547432,31.890338],[-102.54885,31.894709],[-102.549755,31.894819],[-102.552831,31.895127],[-102.553241,31.895173],[-102.553954,31.89526],[-102.554233,31.895292],[-102.554668,31.895347],[-102.555056,31.895385],[-102.555965,31.895489],[-102.557463,31.895656],[-102.558508,31.895777],[-102.56325,31.89632],[-102.567239,31.896769],[-102.563908,31.886451]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43045-001AU","kind":"tract","ac":466.1},"geometry":{"type":"Polygon","coordinates":[[[-102.493529,31.888882],[-102.493765,31.88971],[-102.49757,31.901458],[-102.513862,31.89825],[-102.51476,31.898039],[-102.512932,31.892369],[-102.5125,31.891035],[-102.505521,31.890266],[-102.494529,31.888996],[-102.493529,31.888882]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43043-001AU","kind":"tract","ac":2.3},"geometry":{"type":"Polygon","coordinates":[[[-102.531516,31.893251],[-102.531782,31.894028],[-102.533888,31.893532],[-102.531516,31.893251]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-44037-001AU","kind":"tract","ac":284.6},"geometry":{"type":"Polygon","coordinates":[[[-102.549025,31.895249],[-102.551996,31.904411],[-102.568458,31.900544],[-102.567433,31.897369],[-102.567382,31.897363],[-102.563678,31.896894],[-102.561273,31.89663],[-102.559217,31.896425],[-102.556462,31.896103],[-102.555758,31.896023],[-102.555,31.895948],[-102.554022,31.895831],[-102.553464,31.895761],[-102.552835,31.895694],[-102.549871,31.895348],[-102.549025,31.895249]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43044-001AU","kind":"tract","ac":185.7},"geometry":{"type":"Polygon","coordinates":[[[-102.5125,31.891035],[-102.512932,31.892369],[-102.51476,31.898039],[-102.53014,31.894415],[-102.531782,31.894028],[-102.531516,31.893251],[-102.519287,31.891806],[-102.5125,31.891035]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43044-0001U","kind":"tract","ac":442.1},"geometry":{"type":"Polygon","coordinates":[[[-102.527197,31.88029],[-102.527003,31.880335],[-102.526775,31.880389],[-102.526298,31.880501],[-102.517599,31.882542],[-102.517219,31.882631],[-102.510339,31.884245],[-102.510324,31.884249],[-102.510316,31.884251],[-102.512331,31.8905],[-102.519323,31.891318],[-102.531321,31.892683],[-102.527197,31.88029]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43043-0001U","kind":"tract","ac":619.0},"geometry":{"type":"Polygon","coordinates":[[[-102.54352,31.876457],[-102.527197,31.88029],[-102.531321,31.892683],[-102.535436,31.893167],[-102.547432,31.890338],[-102.547958,31.890214],[-102.544442,31.879313],[-102.54352,31.876457]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43042-0001U","kind":"tract","ac":588.7},"geometry":{"type":"Polygon","coordinates":[[[-102.533888,31.893532],[-102.531782,31.894028],[-102.53014,31.894415],[-102.534676,31.908478],[-102.535628,31.908254],[-102.551996,31.904411],[-102.549025,31.895249],[-102.545468,31.894832],[-102.542091,31.89444],[-102.539699,31.894158],[-102.534309,31.893571],[-102.533888,31.893532]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43038-0001U","kind":"tract","ac":656.7},"geometry":{"type":"Polygon","coordinates":[[[-102.481373,31.905203],[-102.465065,31.909389],[-102.469499,31.923516],[-102.485997,31.919662],[-102.481373,31.905203]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43033-0001U","kind":"tract","ac":683.5},"geometry":{"type":"Polygon","coordinates":[[[-102.51845,31.912285],[-102.501782,31.916193],[-102.505989,31.930744],[-102.523169,31.926717],[-102.51845,31.912285]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43042-0002U","kind":"tract","ac":73.0},"geometry":{"type":"Polygon","coordinates":[[[-102.547432,31.890338],[-102.535436,31.893167],[-102.535467,31.89317],[-102.535473,31.893171],[-102.539444,31.893613],[-102.542045,31.893917],[-102.546049,31.894368],[-102.54885,31.894709],[-102.547432,31.890338]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43046-0001U","kind":"tract","ac":546.9},"geometry":{"type":"Polygon","coordinates":[[[-102.493765,31.88971],[-102.477388,31.892738],[-102.477388,31.892739],[-102.481373,31.905203],[-102.49757,31.901458],[-102.493765,31.88971]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-42042-0001U","kind":"tract","ac":658.0},"geometry":{"type":"Polygon","coordinates":[[[-102.448704,31.91323],[-102.432334,31.917089],[-102.433537,31.921495],[-102.43446,31.925277],[-102.435,31.926864],[-102.435404,31.928232],[-102.4364,31.931299],[-102.4364,31.9313],[-102.453241,31.927332],[-102.453241,31.927332],[-102.448704,31.91323]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-44036-0001U","kind":"tract","ac":664.7},"geometry":{"type":"Polygon","coordinates":[[[-102.568458,31.900544],[-102.551996,31.904411],[-102.556681,31.918853],[-102.573124,31.914991],[-102.568458,31.900544]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-42043-0001U","kind":"tract","ac":653.4},"geometry":{"type":"Polygon","coordinates":[[[-102.44416,31.899097],[-102.428016,31.902183],[-102.428293,31.903161],[-102.429324,31.90666],[-102.432334,31.917089],[-102.448704,31.91323],[-102.444265,31.899425],[-102.44416,31.899097]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43045-001BU","kind":"tract","ac":151.0},"geometry":{"type":"Polygon","coordinates":[[[-102.510316,31.884251],[-102.494006,31.888066],[-102.493805,31.888113],[-102.493542,31.888186],[-102.493573,31.888243],[-102.493632,31.888297],[-102.493681,31.888329],[-102.493737,31.888368],[-102.493782,31.888388],[-102.493837,31.8884],[-102.49393,31.888416],[-102.493999,31.888428],[-102.503454,31.88948],[-102.512331,31.8905],[-102.510316,31.884251]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43026-0001U","kind":"tract","ac":640.9},"geometry":{"type":"Polygon","coordinates":[[[-102.49069,31.934336],[-102.474112,31.938157],[-102.478503,31.95211],[-102.494929,31.948276],[-102.49069,31.934336]]]}},
+            {"type":"Feature","properties":{"name":"T2S00-42031-0006U","kind":"tract","ac":22.5},"geometry":{"type":"Polygon","coordinates":[[[-102.404049,31.829734],[-102.404179,31.830137],[-102.404376,31.830761],[-102.404391,31.830812],[-102.404424,31.830918],[-102.404424,31.830919],[-102.404677,31.831688],[-102.404866,31.832287],[-102.404868,31.832294],[-102.404935,31.83249],[-102.405004,31.832714],[-102.405004,31.832716],[-102.405029,31.83279],[-102.406297,31.832513],[-102.407046,31.832353],[-102.407061,31.83235],[-102.407202,31.832319],[-102.407495,31.832245],[-102.407712,31.832193],[-102.407787,31.832174],[-102.40804,31.832115],[-102.40931,31.831818],[-102.409161,31.83134],[-102.409371,31.83129],[-102.409512,31.831258],[-102.404049,31.829734],[-102.404049,31.829734]]]}},
+            {"type":"Feature","properties":{"name":"T2S00-43002-0001U","kind":"tract","ac":390.4},"geometry":{"type":"Polygon","coordinates":[[[-102.457811,31.884659],[-102.457375,31.885],[-102.460853,31.895903],[-102.477388,31.892738],[-102.475484,31.88684],[-102.474739,31.886763],[-102.473717,31.886632],[-102.471929,31.886348],[-102.470608,31.886209],[-102.46793,31.885974],[-102.465372,31.885655],[-102.460939,31.885136],[-102.459817,31.884964],[-102.457811,31.884659]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43028-0001U","kind":"tract","ac":669.1},"geometry":{"type":"Polygon","coordinates":[[[-102.523169,31.926717],[-102.505989,31.930744],[-102.510471,31.944647],[-102.527716,31.940618],[-102.523169,31.926717]]]}},
+            {"type":"Feature","properties":{"name":"T2S00-42005-001UR","kind":"tract","ac":652.4},"geometry":{"type":"Polygon","coordinates":[[[-102.423082,31.888997],[-102.423011,31.889011],[-102.422927,31.889028],[-102.422359,31.889149],[-102.421988,31.889229],[-102.421353,31.889365],[-102.421058,31.88943],[-102.420938,31.889457],[-102.416178,31.890519],[-102.415803,31.890601],[-102.41568,31.890628],[-102.415296,31.890712],[-102.41359,31.891086],[-102.412481,31.891329],[-102.406084,31.892752],[-102.406231,31.893453],[-102.406292,31.893656],[-102.408515,31.900789],[-102.410332,31.906478],[-102.410339,31.906492],[-102.410347,31.906504],[-102.410357,31.906513],[-102.410369,31.906519],[-102.410382,31.906523],[-102.410397,31.906525],[-102.410414,31.906524],[-102.410432,31.90652],[-102.416846,31.905103],[-102.427321,31.902801],[-102.423082,31.888997]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43047-0001U","kind":"tract","ac":325.0},"geometry":{"type":"Polygon","coordinates":[[[-102.477388,31.892738],[-102.460853,31.895903],[-102.461497,31.897994],[-102.461826,31.899018],[-102.462499,31.898863],[-102.465989,31.898056],[-102.469305,31.897289],[-102.472283,31.898418],[-102.475057,31.902021],[-102.47474,31.902318],[-102.477934,31.905177],[-102.467873,31.907484],[-102.46499,31.906554],[-102.464359,31.906702],[-102.463225,31.903101],[-102.463819,31.902965],[-102.463453,31.901829],[-102.462776,31.901987],[-102.462899,31.90237],[-102.462904,31.902369],[-102.464031,31.905871],[-102.464895,31.908848],[-102.465065,31.909389],[-102.481373,31.905203],[-102.477388,31.892739],[-102.477388,31.892738]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-42031-0001U","kind":"tract","ac":687.8},"geometry":{"type":"Polygon","coordinates":[[[-102.453241,31.927332],[-102.4364,31.9313],[-102.437411,31.934362],[-102.437527,31.934699],[-102.437621,31.935042],[-102.437693,31.935392],[-102.437742,31.935749],[-102.437768,31.936112],[-102.437773,31.936482],[-102.437754,31.936858],[-102.437715,31.937231],[-102.437796,31.93726],[-102.437867,31.937292],[-102.43793,31.937326],[-102.437984,31.937363],[-102.438028,31.937403],[-102.438064,31.937445],[-102.43809,31.937491],[-102.438108,31.937538],[-102.440677,31.945631],[-102.457938,31.941951],[-102.453241,31.927332]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43032-0001U","kind":"tract","ac":692.6},"geometry":{"type":"Polygon","coordinates":[[[-102.535628,31.908254],[-102.534676,31.908478],[-102.51845,31.912285],[-102.523169,31.926717],[-102.540288,31.922701],[-102.535628,31.908254]]]}},
+            {"type":"Feature","properties":{"name":"T2S00-42007-0003U","kind":"tract","ac":31.8},"geometry":{"type":"Polygon","coordinates":[[[-102.420594,31.877414],[-102.420589,31.877415],[-102.420438,31.87745],[-102.420101,31.877527],[-102.419552,31.877654],[-102.419529,31.877659],[-102.419809,31.878585],[-102.421153,31.883268],[-102.422239,31.886599],[-102.423011,31.889011],[-102.423596,31.888895],[-102.422648,31.884479],[-102.422306,31.882778],[-102.422108,31.882097],[-102.421825,31.881266],[-102.420594,31.877414]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43031-0001U","kind":"tract","ac":661.7},"geometry":{"type":"Polygon","coordinates":[[[-102.551996,31.904411],[-102.535628,31.908254],[-102.540288,31.922701],[-102.556681,31.918853],[-102.551996,31.904411]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43039-0001U","kind":"tract","ac":648.0},"geometry":{"type":"Polygon","coordinates":[[[-102.49757,31.901458],[-102.481373,31.905203],[-102.485997,31.919662],[-102.486464,31.919553],[-102.501782,31.916193],[-102.49757,31.901458]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43035-0001U","kind":"tract","ac":676.2},"geometry":{"type":"Polygon","coordinates":[[[-102.485997,31.919662],[-102.469499,31.923516],[-102.469574,31.923754],[-102.472615,31.933374],[-102.474112,31.938157],[-102.49069,31.934336],[-102.485997,31.919662]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43037-0001U","kind":"tract","ac":630.9},"geometry":{"type":"Polygon","coordinates":[[[-102.464791,31.909473],[-102.448704,31.91323],[-102.453241,31.927332],[-102.453241,31.927332],[-102.469189,31.92359],[-102.464791,31.909473]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43041-0001U","kind":"tract","ac":638.8},"geometry":{"type":"Polygon","coordinates":[[[-102.53014,31.894415],[-102.51476,31.898039],[-102.513862,31.89825],[-102.51845,31.912285],[-102.534676,31.908478],[-102.53014,31.894415]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43030-0001U","kind":"tract","ac":639.0},"geometry":{"type":"Polygon","coordinates":[[[-102.556681,31.918853],[-102.540288,31.922701],[-102.544783,31.936628],[-102.561202,31.932787],[-102.556681,31.918853]]]}},
+            {"type":"Feature","properties":{"name":"T2S00-42007-0003U","kind":"tract","ac":3.4},"geometry":{"type":"Polygon","coordinates":[[[-102.419053,31.875012],[-102.419002,31.875022],[-102.418953,31.875038],[-102.418908,31.87506],[-102.418867,31.875089],[-102.418833,31.875122],[-102.418805,31.87516],[-102.418784,31.875201],[-102.418979,31.875845],[-102.419353,31.877024],[-102.420131,31.876844],[-102.420237,31.87682],[-102.420255,31.876816],[-102.420174,31.876718],[-102.420088,31.876624],[-102.419996,31.876522],[-102.419911,31.876416],[-102.419831,31.876306],[-102.419758,31.876194],[-102.419691,31.876078],[-102.419631,31.875961],[-102.419577,31.87584],[-102.419531,31.875718],[-102.419491,31.875594],[-102.419459,31.875468],[-102.419433,31.875341],[-102.419415,31.875214],[-102.419396,31.875172],[-102.41937,31.875133],[-102.419338,31.875098],[-102.419299,31.875068],[-102.419255,31.875044],[-102.419207,31.875026],[-102.419157,31.875014],[-102.419105,31.87501],[-102.419053,31.875012]]]}},
+            {"type":"Feature","properties":{"name":"T2S00-43011-0001U","kind":"tract","ac":600.9},"geometry":{"type":"Polygon","coordinates":[[[-102.466291,31.864293],[-102.456239,31.866641],[-102.451463,31.86774],[-102.453929,31.875538],[-102.454272,31.875458],[-102.454333,31.875444],[-102.454582,31.875385],[-102.454586,31.875384],[-102.455499,31.875171],[-102.455668,31.875697],[-102.455913,31.875639],[-102.456369,31.87706],[-102.456033,31.877139],[-102.456136,31.877459],[-102.456472,31.87738],[-102.45662,31.877839],[-102.455155,31.878182],[-102.455145,31.878185],[-102.454793,31.878267],[-102.45559,31.880802],[-102.455742,31.881222],[-102.472531,31.877609],[-102.469846,31.869213],[-102.469381,31.86776],[-102.467477,31.868205],[-102.466291,31.864293]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-44048-0001U","kind":"tract","ac":626.4},"geometry":{"type":"Polygon","coordinates":[[[-102.559687,31.87252],[-102.558516,31.872805],[-102.543632,31.876431],[-102.54353,31.876455],[-102.54352,31.876457],[-102.544442,31.879313],[-102.547958,31.890214],[-102.563908,31.886451],[-102.564169,31.886389],[-102.559687,31.87252]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43025-0001U","kind":"tract","ac":616.7},"geometry":{"type":"Polygon","coordinates":[[[-102.473801,31.938229],[-102.457938,31.941951],[-102.462366,31.955873],[-102.478215,31.952177],[-102.473801,31.938229]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43036-0001U","kind":"tract","ac":650.1},"geometry":{"type":"Polygon","coordinates":[[[-102.469189,31.92359],[-102.453241,31.927332],[-102.457938,31.941951],[-102.473801,31.938229],[-102.472293,31.933399],[-102.469263,31.923827],[-102.469189,31.92359]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43048-0001U","kind":"tract","ac":622.6},"geometry":{"type":"Polygon","coordinates":[[[-102.460533,31.895964],[-102.44416,31.899097],[-102.444265,31.899425],[-102.448704,31.91323],[-102.464791,31.909473],[-102.464715,31.909229],[-102.464607,31.908921],[-102.464019,31.907],[-102.462667,31.902687],[-102.461878,31.900234],[-102.461092,31.897791],[-102.460533,31.895964]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-42030-0001U","kind":"tract","ac":673.8},"geometry":{"type":"Polygon","coordinates":[[[-102.457938,31.941951],[-102.440677,31.945631],[-102.445234,31.959866],[-102.461231,31.956138],[-102.462366,31.955873],[-102.457938,31.941951]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43034-0001U","kind":"tract","ac":631.2},"geometry":{"type":"Polygon","coordinates":[[[-102.501782,31.916193],[-102.486464,31.919553],[-102.485997,31.919662],[-102.49069,31.934336],[-102.491218,31.934214],[-102.505989,31.930744],[-102.501782,31.916193]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43040-0001U","kind":"tract","ac":656.9},"geometry":{"type":"Polygon","coordinates":[[[-102.513862,31.89825],[-102.49757,31.901458],[-102.501782,31.916193],[-102.51845,31.912285],[-102.513862,31.89825]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43027-0001U","kind":"tract","ac":598.7},"geometry":{"type":"Polygon","coordinates":[[[-102.505989,31.930744],[-102.491218,31.934214],[-102.49069,31.934336],[-102.494929,31.948276],[-102.510471,31.944647],[-102.505989,31.930744]]]}},
+            {"type":"Feature","properties":{"name":"T1S00-43029-0001U","kind":"tract","ac":665.1},"geometry":{"type":"Polygon","coordinates":[[[-102.540288,31.922701],[-102.523169,31.926717],[-102.527716,31.940618],[-102.544783,31.936628],[-102.540288,31.922701]]]}},
+            {"type":"Feature","properties":{"name":"Untitled Polygon","kind":"tract","ac":645.2},"geometry":{"type":"Polygon","coordinates":[[[-102.455352,31.881197],[-102.439615,31.884669],[-102.443748,31.898972],[-102.460324,31.895715],[-102.455352,31.881197]]]}},
+            {"type":"Feature","properties":{"name":"Untitled Polygon","kind":"tract","ac":678.5},"geometry":{"type":"Polygon","coordinates":[[[-102.493728,31.889443],[-102.48903,31.87434],[-102.472267,31.877849],[-102.477626,31.892497],[-102.493728,31.889443]]]}},
+            {"type":"Feature","properties":{"name":"Untitled Polygon","kind":"tract","ac":613.8},"geometry":{"type":"Polygon","coordinates":[[[-102.47681,31.891776],[-102.471706,31.877877],[-102.455832,31.881284],[-102.460775,31.894916],[-102.47681,31.891776]]]}},
+            {"type":"Feature","properties":{"name":"Untitled Polygon","kind":"tract","ac":581.9},"geometry":{"type":"Polygon","coordinates":[[[-102.455352,31.881197],[-102.451087,31.86821],[-102.435021,31.871474],[-102.439377,31.884625],[-102.455352,31.881197]]]}},
+            {"type":"Feature","properties":{"name":"Untitled Polygon","kind":"tract","ac":604.5},"geometry":{"type":"Polygon","coordinates":[[[-102.443638,31.899397],[-102.439611,31.885056],[-102.423533,31.888987],[-102.428367,31.902364],[-102.443638,31.899397]]]}},
+            {"type":"Feature","properties":{"name":"Untitled Polygon","kind":"tract","ac":562.0},"geometry":{"type":"Polygon","coordinates":[[[-102.439134,31.884968],[-102.434837,31.871608],[-102.420032,31.874592],[-102.424444,31.888593],[-102.439134,31.884968]]]}},
+            {"type":"Feature","properties":{"name":"Dahlia 1","kind":"outline","ac":34.4},"geometry":{"type":"Polygon","coordinates":[[[-102.55777,31.89628],[-102.556965,31.899455],[-102.56288,31.898333],[-102.563611,31.896953],[-102.55777,31.89628]]]}},
+            {"type":"Feature","properties":{"name":"Dahlia 2","kind":"outline","ac":26.2},"geometry":{"type":"Polygon","coordinates":[[[-102.563771,31.896378],[-102.562476,31.892727],[-102.55943,31.893317],[-102.560559,31.896017],[-102.563771,31.896378]]]}}
+        ] };
+
+        function jrStyle(feature) {
+            const p = feature.properties || {};
+            if (p.kind === 'outline') return { fill: false, color: JR_COLOR, weight: 3.5, opacity: 1, dashArray: '8 4' };
+            return { fillColor: JR_COLOR, fillOpacity: 0.35, color: JR_COLOR, weight: 1.5, opacity: 0.95 };
+        }
+
+        function jrPopup(p) {
+            const ac = p.ac != null ? p.ac.toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' ac' : 'N/A';
+            const label = p.kind === 'outline' ? 'Outline' : 'Tract';
+            return `
+                <div style="font-family: 'Inter', sans-serif; min-width: 180px;">
+                    <div style="font-weight: 700; font-size: 1rem; color: #7cb000; margin-bottom: 0.4rem;">Johnson Ranch</div>
+                    <div style="font-size: 0.85rem; color: #333; line-height: 1.6;">
+                        <strong>${label}:</strong> ${tplEsc(p.name)}<br>
+                        <strong>Acres (from KMZ):</strong> ${ac}<br>
+                        <span style="font-size: 0.72rem; color: #777;">Johnson Ranch Boundaries.kmz &middot; Ector County &middot; not survey-grade</span>
+                    </div>
+                </div>`;
+        }
+
+        function loadJohnsonRanch() {
+            if (!jrLayer) {
+                jrLayer = L.geoJSON(JOHNSON_RANCH_GEOJSON, {
+                    style: jrStyle,
+                    onEachFeature: (feature, layer) => layer.bindPopup(jrPopup(feature.properties))
+                });
+                console.log(`Johnson Ranch: ${JOHNSON_RANCH_GEOJSON.features.length} polygons from embedded KMZ`);
+            }
+            jrLayer.addTo(map);
+        }
+
+        // "Zoom to" button: turns the overlay on if needed, then fits the map to it.
+        function zoomToJohnsonRanch() {
+            const cb = document.getElementById('jrToggleCheckbox');
+            if (cb && !cb.checked) cb.checked = true;
+            loadJohnsonRanch();
+            map.fitBounds(jrLayer.getBounds(), { padding: [40, 40] });
+        }
 
         // Haversine formula for distance calculation
         // ---------------------------------------------------------------
